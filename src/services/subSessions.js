@@ -634,6 +634,9 @@ function attachMessagesHandler(session, sock) {
         });
     } catch (_) {}
 
+    // Ligações 1:1 na sub-sessão — rejeita em silêncio (não toca no dono).
+    try { require('../events/calls').registerCallHandler(sock); } catch (_) {}
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         try {
             // Anti-fantasma: se a sessão saiu do map (logoff/close/logged-out) ou o

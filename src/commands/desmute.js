@@ -24,14 +24,26 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Você precisa marcar ou citar alguém para desmutar.' }, { quoted: m });
         }
 
-        const wasMuted = utils.isMuted(from, participant);
-        utils.removeMuted(from, participant);
+        const identity = require('../services/identity');
+        let keys = [participant];
+        try {
+            const k = await identity.targetKeys(sock, utils, from, participant);
+            if (k && Array.isArray(k.all) && k.all.length) keys = k.all;
+        } catch (_) {}
+        const label = await identity.personLabel(sock, utils, from, participant).catch(() => 'membro');
+
+        const wasMuted = typeof utils.isMutedAny === 'function'
+            ? utils.isMutedAny(from, keys)
+            : utils.isMuted(from, participant);
+        for (const k of keys) {
+            try { utils.removeMuted(from, k); } catch (_) {}
+        }
 
         await utils.react(sock, m, '🔊', lastBotResponse, GLOBAL_COOLDOWN);
         return await sock.sendMessage(from, {
             text: wasMuted
-                ? `🔊 @${participant.split('@')[0]} foi desmutado.`
-                : `ℹ️ @${participant.split('@')[0]} não estava na lista de mute.`,
+                ? `🔊 ${label} foi desmutado.`
+                : `ℹ️ ${label} não estava na lista de mute.`,
             mentions: [participant]
         }, { quoted: m });
     }

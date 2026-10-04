@@ -26,14 +26,21 @@ module.exports = {
 
         // Se marcou alguém específico
         if (participant) {
-            const count = groupData.warnings[participant] || 0;
+            const identity = require('../services/identity');
+            let keys = [participant];
+            try {
+                const k = await identity.targetKeys(sock, utils, from, participant);
+                if (k && Array.isArray(k.all) && k.all.length) keys = k.all;
+            } catch (_) {}
+            const label = await identity.personLabel(sock, utils, from, participant).catch(() => 'membro');
+            const count = identity.warnCount(groupData.warnings, keys);
             if (count === 0) {
-                return await sock.sendMessage(from, { text: `ℹ️ @${participant.split('@')[0]} não possui advertências.`, mentions: [participant] }, { quoted: m });
+                return await sock.sendMessage(from, { text: `ℹ️ ${label} não possui advertências.`, mentions: [participant] }, { quoted: m });
             }
-            delete groupData.warnings[participant];
+            identity.warnDeleteAll(groupData.warnings, keys);
             utils.setGroupData(from, groupData);
             await utils.react(sock, m, '✅', lastBotResponse, GLOBAL_COOLDOWN);
-            return await sock.sendMessage(from, { text: `✅ Advertências de @${participant.split('@')[0]} foram limpas. (${count} → 0)`, mentions: [participant] }, { quoted: m });
+            return await sock.sendMessage(from, { text: `✅ Advertências de ${label} foram limpas. (${count} → 0)`, mentions: [participant] }, { quoted: m });
         }
 
         // Sem marcação: verifica se quer limpar todos

@@ -9,9 +9,23 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Este comando só funciona em grupos.' }, { quoted: m });
         }
 
-        const admins = await utils.getAdmins(sock, from).catch(() => []);
-        if (!utils.isUserAdmin(sender, admins)) {
-            return await sock.sendMessage(from, { text: '❌ Apenas administradores podem usar este comando.' }, { quoted: m });
+        const meId = utils.normalizeJid(sock.user.id);
+        const senderNorm = utils.normalizeJid(sender);
+        const isBotOwner = m.key.fromMe === true || sender === meId || senderNorm === meId;
+
+        let allowed = isBotOwner;
+        if (!allowed && typeof utils.canConfigureBot === 'function') {
+            try { if (utils.canConfigureBot(sock, m, sender, from).ok) allowed = true; } catch (_) {}
+        }
+        if (!allowed && typeof utils.canGuardianActAsync === 'function') {
+            try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) allowed = true; } catch (_) {}
+        }
+        if (!allowed) {
+            const admins = await utils.getAdmins(sock, from).catch(() => []);
+            if (utils.isUserAdmin(sender, admins)) allowed = true;
+        }
+        if (!allowed) {
+            return await sock.sendMessage(from, { text: '❌ Apenas administradores do grupo, dono, sub-donos ou guardiões podem usar este comando.' }, { quoted: m });
         }
 
         const auto = require('../services/autoResponder');

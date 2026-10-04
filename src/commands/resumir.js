@@ -44,19 +44,22 @@ module.exports = {
             }
 
             const maxPromptLength = Number(config?.aiMaxPromptLength) || 2000;
-            let finalPrompt = `${basePrompt}\n\n${contentToSummarize}`;
+            // Estilo WhatsApp aplicado de leve mesmo com prompt customizado
+            const styleSuffix = '\n\n[Estilo: parágrafos narrativos curtos, sem lista. Formatação WhatsApp de leve — *negrito* em nomes/palavras-chave, _itálico_ em observações, > citação para no máx. 1 frase marcante, `código` só se precisar. Use de 4 a 8 emojis no texto 📝✨😂🔥🤖👀, sem exagerar.]';
+            let finalPrompt = `${basePrompt}\n\n${contentToSummarize}${styleSuffix}`;
             if (finalPrompt.length > maxPromptLength) {
-                const maxContentLength = maxPromptLength - basePrompt.length - 200;
+                const maxContentLength = maxPromptLength - basePrompt.length - styleSuffix.length - 200;
                 if (maxContentLength > 100) {
                     contentToSummarize = contentToSummarize.slice(0, maxContentLength) + '\n\n[Nota: histórico truncado por limite de tokens.]';
-                    finalPrompt = `${basePrompt}\n\n${contentToSummarize}`;
+                    finalPrompt = `${basePrompt}\n\n${contentToSummarize}${styleSuffix}`;
                 }
             }
             const result = await model.generateContent(finalPrompt, { signal: abortSignal });
             const responseText = result.response.text();
             
             if (!responseText) throw new Error('Resposta vazia da IA');
-            await sock.sendMessage(from, { text: responseText }, { quoted: m }); 
+            const styledText = `📝 *Resumo do chat* ✨\n\n${responseText.trim()}\n\n> _resumo automático 🤖_`;
+            await sock.sendMessage(from, { text: styledText }, { quoted: m }); 
             return await react(sock, m, '✅', currentBotResponse, GLOBAL_COOLDOWN);
         } catch (e) {
             if (e?.code === 'ABORTED' || abortSignal?.aborted) return currentBotResponse;

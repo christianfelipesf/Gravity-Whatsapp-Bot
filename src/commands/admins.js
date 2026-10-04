@@ -16,7 +16,12 @@ module.exports = {
         }
 
         const jids = admins.map(a => a.id || a.jid).filter(Boolean);
-        const lines = jids.map((j, i) => `${i + 1}. @${String(j).split('@')[0]}`);
+        const identity = require('../services/identity');
+        const lines = [];
+        for (let i = 0; i < jids.length; i++) {
+            const label = await identity.personLabel(sock, utils, from, jids[i]).catch(() => 'membro');
+            lines.push(`${i + 1}. ${label}`);
+        }
         return await sock.sendMessage(from, { text: `👑 *Admins (${jids.length})*\n${lines.join('\n')}`, mentions: jids }, { quoted: m });
     }
 };

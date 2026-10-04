@@ -32,7 +32,7 @@ let ioServer = null;
 let sockRef = null;
 let groupsApi = null;
 let httpServer = null;
-const MAX_LOGS = 200;
+const MAX_LOGS = 100000;
 const HISTORY_SEND_LIMIT = 300;
 const groupInfoCache = new Map();
 const GROUP_INFO_TTL = 60 * 1000;
@@ -311,7 +311,42 @@ async function getGroupsSnapshot(options = {}) {
     return out.sort((a, b) => String(a.subject).localeCompare(String(b.subject), 'pt-BR'));
 }
 
+// Trim do histórico: DONO é src/history/store.js (histórico não depende do
+// painel web). Esta função aqui é só alias legado p/ compat — delega.
+// Lê history* a cada ciclo para respeitar !set sem restart.
+function ensureLogsTrimLoop() {
+    try { return require('../history/store').ensureHistoryTrimLoop(); } catch (_) {}
+    if (logsTrimTimer) return true;
+    const runTrim = (isBoot) => {
+        try {
+            const lim = require('../history/store').getHistoryLimits();
+            const maxRows = lim.maxRows, maxAgeMs = lim.maxAgeMs;
+            const c = countDashboardLogs();
+            if (c > maxRows || (maxAgeMs > 0 && c > 0)) {
+                trimDashboardLogs({ maxAgeMs, maxRows });
+                try { require('../database/utils').checkpointWal(); } catch (_) {}
+                if (isBoot && c > maxRows) {
+                    try {
+                        const after = countDashboardLogs();
+                        if (after !== c) console.log(`🧹 [history] logs (maxRows): ${c} → ${after} (max=${maxRows})`);
+                    } catch (_) {}
+                }
+            }
+        } catch (_) {}
+    };
+    let intervalMs = 5 * 60 * 1000;
+    try {
+        intervalMs = require('../history/store').getHistoryLimits().intervalMs;
+    } catch (_) {}
+    runTrim(true);
+    logsTrimTimer = setInterval(() => runTrim(false), intervalMs);
+    if (logsTrimTimer.unref) logsTrimTimer.unref();
+    return true;
+}
+
 function init(config) {
+    // Histórico primeiro: dono é src/history/store.js, independe do painel.
+    try { ensureLogsTrimLoop(); } catch (_) {}
     if (config && config.dashboardEnabled === false) return null;
 
     const port = (config && config.dashboardPort) || 3000;
@@ -1046,30 +1081,9 @@ function init(config) {
         }, 10 * 60 * 1000);
         if (groupsRefreshTimer.unref) groupsRefreshTimer.unref();
 
-        const maxRows = Number(config?.dashboardMaxLogs) || MAX_LOGS;
-        const maxAgeMs = (Number(config?.dashboardHistoryHours) || 12) * 3600 * 1000;
-        const trimIntervalMs = Math.max(30 * 1000, Number(config?.dashboardTrimIntervalMs) || 5 * 60 * 1000);
-        logsTrimTimer = setInterval(() => {
-            try {
-                const c = countDashboardLogs();
-                if (c > maxRows || (maxAgeMs > 0 && c > 0)) {
-                    trimDashboardLogs({ maxAgeMs, maxRows });
-                    try { require('../database/utils').checkpointWal(); } catch (_) {}
-                }
-            } catch (_) {}
-        }, trimIntervalMs);
-        if (logsTrimTimer.unref) logsTrimTimer.unref();
-
-        try {
-            const before = countDashboardLogs();
-            if (before > maxRows) {
-                trimDashboardLogs({ maxAgeMs: 0, maxRows });
-                const after = countDashboardLogs();
-                if (after !== before) {
-                    console.log(`🧹 [dashboard] logs (maxRows): ${before} → ${after} (max=${maxRows})`);
-                }
-            }
-        } catch (_) {}
+        // Trim do histórico é independente do painel (ver ensureLogsTrimLoop,
+        // já iniciado no init mesmo com dashboard desligado).
+        try { ensureLogsTrimLoop(); } catch (_) {}
     } catch (e) {
         console.error('[dashboard] falha ao iniciar HTTP:', e.message);
     }
@@ -1742,7 +1756,7 @@ function stop() {
             try { httpServer.close(() => { pending--; if (pending === 0) resolve(); }); } catch (_) { pending--; }
         }
         if (groupsRefreshTimer) { try { clearInterval(groupsRefreshTimer); groupsRefreshTimer = null; } catch (_) {} }
-        if (logsTrimTimer) { try { clearInterval(logsTrimTimer); logsTrimTimer = null; } catch (_) {} }
+        // logsTrimTimer NÃO é parado aqui: trim do histórico independe do painel.
         if (accessLogStream) { try { accessLogStream.end(); } catch (_) {} accessLogStream = null; }
         ioServer = null;
         httpServer = null;
@@ -1757,6 +1771,7 @@ module.exports = {
     setStartTime,
     handleReaction,
     resetDashboard, setMaxLogs, stop,
+    ensureLogsTrimLoop,
     mediaForLogReceived, mediaForLogSent,
     emitMediaUpdate,
     setConnectionState, getConnectionState

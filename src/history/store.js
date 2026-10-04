@@ -43,8 +43,9 @@ function _syntheticMessageId(type, toJid, text, fileName) {
 function writeLog(type, group, text, name = null, phone = null, media = null, extra = {}) {
     try {
         try {
+            // Histórico tem mute próprio (historyMuted); dashboardMuted é alias legado.
             const cfg = utils.readConfig();
-            if (cfg && cfg.dashboardMuted === true) return false;
+            if (cfg && (cfg.historyMuted === true || (cfg.historyMuted === undefined && cfg.dashboardMuted === true))) return false;
         } catch (_) {}
         const messageId = extra.messageId || _syntheticMessageId(type, extra.toJid, text, extra.attachment?.fileName);
         const logData = {
@@ -130,6 +131,60 @@ function rememberGroup(jid, patch = {}) {
     } catch (_) {}
 }
 
+// --- Retenção (dono do trim: histórico, NÃO o painel web) ------------------
+// Roda SEMPRE, mesmo com dashboardEnabled=false. Lê history* a cada ciclo
+// para respeitar !set sem restart. Idempotente (guarda em _trimTimer).
+let _trimTimer = null;
+
+function _historyLimits() {
+    try {
+        if (typeof utils.getHistoryLimits === 'function') return utils.getHistoryLimits();
+    } catch (_) {}
+    try {
+        const cfg = utils.readConfig();
+        return {
+            maxRows: Math.max(1000, Number(cfg?.historyMaxLogs ?? cfg?.dashboardMaxLogs) || 100000),
+            maxAgeMs: (Math.max(1, Number(cfg?.historyHours ?? cfg?.dashboardHistoryHours) || 168)) * 3600 * 1000,
+            intervalMs: Math.max(30 * 1000, Number(cfg?.historyTrimIntervalMs ?? cfg?.dashboardTrimIntervalMs) || 5 * 60 * 1000)
+        };
+    } catch (_) {
+        return { maxRows: 100000, maxAgeMs: 168 * 3600 * 1000, intervalMs: 5 * 60 * 1000 };
+    }
+}
+
+function runHistoryTrimOnce(isBoot = false) {
+    try {
+        const { maxRows, maxAgeMs } = _historyLimits();
+        const c = utils.countDashboardLogs();
+        if (c > maxRows || (maxAgeMs > 0 && c > 0)) {
+            utils.trimDashboardLogs({ maxAgeMs, maxRows });
+            try { utils.checkpointWal(); } catch (_) {}
+            // messages tem teto próprio por grupo (summaryLimit) — o flush só
+            // apara jids recém-escritos, então o PULL pode deixar excedente.
+            try { utils.trimMessagesToLimit?.(); } catch (_) {}
+            if (isBoot && c > maxRows) {
+                try {
+                    const after = utils.countDashboardLogs();
+                    if (after !== c) console.log(`🧹 [history] logs (maxRows): ${c} → ${after} (max=${maxRows})`);
+                } catch (_) {}
+            }
+        } else {
+            // Mesmo sem estourar logs, garante o teto de messages (barato:
+            // só conta por jid e sai quando ninguém excede).
+            try { utils.trimMessagesToLimit?.(); } catch (_) {}
+        }
+    } catch (_) {}
+}
+
+function ensureHistoryTrimLoop() {
+    if (_trimTimer) return true;
+    const { intervalMs } = _historyLimits();
+    runHistoryTrimOnce(true);
+    _trimTimer = setInterval(() => runHistoryTrimOnce(false), intervalMs);
+    if (_trimTimer.unref) _trimTimer.unref();
+    return true;
+}
+
 // --- Leitura (caminho próprio do !aidono / !resumir) ------------------------
 
 module.exports = {
@@ -157,5 +212,11 @@ module.exports = {
     saveMessage: utils.saveMessage,
     getChatHistory: utils.getChatHistory,
     trimHistoryLogs: utils.trimDashboardLogs,
-    countHistoryLogs: utils.countDashboardLogs
+    countHistoryLogs: utils.countDashboardLogs,
+    getHistoryLimits: () => _historyLimits(),
+    getHistoryStats: utils.getHistoryStats,
+    getHistoryWindowLabel: utils.getHistoryWindowLabel,
+    trimMessagesToLimit: utils.trimMessagesToLimit,
+    ensureHistoryTrimLoop,
+    runHistoryTrimOnce
 };

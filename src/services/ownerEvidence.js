@@ -577,7 +577,16 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
         lines.unshift(`Alvos da pergunta (resolvidos pelo bot): ${resoParts.join('; ')}.`);
     }
     if (tr) {
-        lines.unshift(`Janela da pergunta: ${tr.label} (histórico de até 7 dias).`);
+        let retention = 'histórico retido: até 168h (~7 dias)';
+        try {
+            if (utils?.getHistoryWindowLabel) retention = utils.getHistoryWindowLabel();
+            else if (utils?.readConfig) {
+                const cfg = utils.readConfig();
+                const h = Number(cfg?.historyHours ?? cfg?.dashboardHistoryHours) || 168;
+                retention = `histórico retido: até ${h}h`;
+            }
+        } catch (_) {}
+        lines.unshift(`Janela da pergunta: ${tr.label} (${retention}).`);
     }
 
     const text = lines.join('\n').slice(0, 2800);
@@ -662,7 +671,12 @@ function matchFactual(question, evidence, { isGroup, from, utils } = {}) {
             const entries = Object.entries(w).filter(([, c]) => (Number(c) || 0) > 0)
                 .sort((a, b) => b[1] - a[1]).slice(0, 10);
             if (entries.length === 0) return '✅ Ninguém tem advertências neste grupo.';
-            return '⚠️ *Advertências ativas*\n' + entries.map(([jid, c], i) => `${i + 1}. @${String(jid).split('@')[0]} — ${c}/3`).join('\n');
+            // Nunca exibe LID/dígitos crus: safePersonLabel esconde 14-15 dígitos.
+            return '⚠️ *Advertências ativas*\n' + entries.map(([jid, c], i) => {
+                const digits = String(jid).split('@')[0];
+                const label = safePersonLabel(isLidJid(jid) ? null : `@${digits}`, personTag(i, entries.length));
+                return `${i + 1}. ${label} — ${c}/3`;
+            }).join('\n');
         } catch (_) { return null; }
     }
     if (wantsCount && evidence.stats.people.length > 0) {

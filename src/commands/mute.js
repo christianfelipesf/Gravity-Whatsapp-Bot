@@ -31,21 +31,33 @@ module.exports = {
 
         const isBotAdmin = await utils.botIsAdmin(sock, from);
 
-        const added = utils.addMuted(from, participant);
+        // Chaves telefone+LID: o mute vale em qualquer formato que chegar.
+        const identity = require('../services/identity');
+        let keys = [participant];
+        try {
+            const k = await identity.targetKeys(sock, utils, from, participant);
+            if (k && Array.isArray(k.all) && k.all.length) keys = k.all;
+        } catch (_) {}
+        const label = await identity.personLabel(sock, utils, from, participant).catch(() => 'membro');
+
+        let added = false;
+        for (const k of keys) {
+            try { if (utils.addMuted(from, k)) added = true; } catch (_) {}
+        }
 
         await utils.react(sock, m, '🔇', lastBotResponse, GLOBAL_COOLDOWN);
 
         if (!isBotAdmin) {
             return await sock.sendMessage(from, {
-                text: `⚠️ @${participant.split('@')[0]} foi adicionado à lista de mute, mas *eu não sou administrador* deste grupo, portanto não consigo apagar as mensagens dele. Promova o bot a admin para que o mute funcione.`,
+                text: `⚠️ ${label} foi adicionado à lista de mute, mas *eu não sou administrador* deste grupo, portanto não consigo apagar as mensagens dele. Promova o bot a admin para que o mute funcione.`,
                 mentions: [participant]
             }, { quoted: m });
         }
 
         return await sock.sendMessage(from, {
             text: added
-                ? `🔇 @${participant.split('@')[0]} foi mutado. As mensagens dele serão apagadas enquanto o bot estiver ligado.`
-                : `ℹ️ @${participant.split('@')[0]} já estava mutado.`,
+                ? `🔇 ${label} foi mutado. As mensagens dele serão apagadas enquanto o bot estiver ligado.`
+                : `ℹ️ ${label} já estava mutado.`,
             mentions: [participant]
         }, { quoted: m });
     }

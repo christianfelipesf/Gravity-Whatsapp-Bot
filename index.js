@@ -88,6 +88,12 @@ try { telegramBot.start(); } catch (e) {
 global.__botServices = { news, splash, dashboard, watchdog, telegram, telegramBot };
 global.__startTime = Date.now();
 
+// Histórico (!aidono/!resumir) — dono próprio, independe do painel web.
+// O dashboard.init() também chama, mas aqui garante mesmo se o painel falhar.
+try { require('./src/history/store').ensureHistoryTrimLoop(); } catch (e) {
+    console.error('⚠️ [history] falha ao iniciar trim (segue normal):', e.message);
+}
+
 // Iniciar Dashboard (Modular) - totalmente isolado
 try {
     dashboard.init(config);
@@ -450,6 +456,9 @@ async function startBot() {
         try { watchdog.touchInbound(); } catch (_) {}
         handleMessageUpsert(sock, upsert, { commands, config, startTime });
     });
+
+    // Ligações 1:1 — rejeita em silêncio (não toca no celular do dono).
+    try { require('./src/events/calls').registerCallHandler(sock); } catch (_) {}
 
     // Listener direto no websocket para half-open (adicional ao connection.update)
     try {

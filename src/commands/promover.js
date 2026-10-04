@@ -41,6 +41,8 @@ module.exports = {
         }
 
         await utils.reactStatus(sock, m, from, true, '✅', '❌', lastBotResponse, GLOBAL_COOLDOWN);
-        return await sock.sendMessage(from, { text: `✅ @${participant.split('@')[0]} foi promovido a administrador.`, mentions: [participant] }, { quoted: m });
+        const identity = require('../services/identity');
+        const label = await identity.personLabel(sock, utils, from, participant).catch(() => 'membro');
+        return await sock.sendMessage(from, { text: `✅ ${label} foi promovido a administrador.`, mentions: [participant] }, { quoted: m });
     }
 };

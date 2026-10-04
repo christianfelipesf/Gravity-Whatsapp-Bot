@@ -178,7 +178,23 @@ module.exports = {
                     forcedName = quotedContacts[0].name || null;
                     target = forcedPhone;
                 } else if (typedDigits) {
-                    forcedPhone = `${typedDigits}@s.whatsapp.net`;
+                    // Dígitos de LID colado: converte p/ telefone real; se tem cara
+                    // de LID (>=14 dígitos) e não resolve, rejeita em vez de montar JID falso.
+                    let digits = typedDigits;
+                    try {
+                        const identity = require('../services/identity');
+                        const r = await identity.resolveCandidateToPhone(sock, utils, typedDigits, from);
+                        if (r.phone && r.phone !== typedDigits) digits = r.phone;
+                        else if (typedDigits.length >= 14 && !r.resolvedFromLid) digits = null;
+                    } catch (_) {}
+                    if (!digits) {
+                        const prefix = (config && config.prefix) || '!';
+                        await sock.sendMessage(from, {
+                            text: `╭─── *👤 PERFIL* ───\n│ ❓ Isso parece um ID interno (@lid), não um número.\n│ 💡 Use *${prefix}perfil @pessoa* ou digite o número com DDI+DDD.\n╰───────────────`
+                        }, { quoted: m });
+                        return currentBotResponse;
+                    }
+                    forcedPhone = `${digits}@s.whatsapp.net`;
                     target = forcedPhone;
                 }
             }

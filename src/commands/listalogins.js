@@ -25,11 +25,23 @@ module.exports = {
             return currentBotResponse;
         }
 
-        const lines = list.map((r, i) => {
+        const identity = require('../services/identity');
+        const groups = identity.groupsForSearch(utils, from, 15);
+        let lidMap = new Map();
+        try {
+            lidMap = await identity.buildLidPhoneMap(sock, utils, groups, 15);
+        } catch (_) {}
+
+        const lines = [];
+        for (let i = 0; i < list.length; i++) {
+            const r = list[i];
+            const real = lidMap.get(r.phone) || r.phone;
+            const d = await identity.displayPerson(sock, utils, from, real, lidMap);
+            const who = d.name ? `*${d.name}* — ${identity.formatPhoneDisplay(d.phone)}` : `\`${d.phone}\``;
             let date = '';
             try { date = r.added_at ? new Date(Number(r.added_at)).toLocaleString('pt-BR') : ''; } catch (_) {}
-            return `${i + 1}. \`${r.phone}\`${date ? ` — ${date}` : ''}`;
-        });
+            lines.push(`${i + 1}. ${who}${date ? ` — ${date}` : ''}`);
+        }
 
         await sock.sendMessage(from, {
             text: `📋 *Logins autorizados (${list.length})*\n\n${lines.join('\n')}\n\n💡 Esses números podem usar *!login* no privado sem ser dono.\n➕ *!addlogin <numero>* • ➖ *!removerlogin <numero>*`

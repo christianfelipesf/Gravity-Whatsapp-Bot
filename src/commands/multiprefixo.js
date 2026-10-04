@@ -20,20 +20,27 @@ module.exports = {
         const botName = config.botName || 'Bot';
         const globalPrefix = (() => { try { return String(readConfig().prefix || '!')[0]; } catch (_) { return '!'; } })();
 
-        // Só admin do grupo (ou dono do bot) pode mexer.
+        // Dono, sub-dono e guardiões podem mexer mesmo sem ser ADM do grupo.
+        // Só admin do grupo (ou dono/sub-dono/guardião do bot) pode mexer.
         let isAllowed = false;
         try {
             const meId = normalizeJid(sock.user.id);
             const senderNorm = normalizeJid(sender);
             const isBotOwner = m.key.fromMe === true || sender === meId || senderNorm === meId;
             if (isBotOwner) isAllowed = true;
-            else {
+            if (!isAllowed && typeof utils.canConfigureBot === 'function') {
+                try { if (utils.canConfigureBot(sock, m, sender, from).ok) isAllowed = true; } catch (_) {}
+            }
+            if (!isAllowed && typeof utils.canGuardianActAsync === 'function') {
+                try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) isAllowed = true; } catch (_) {}
+            }
+            if (!isAllowed) {
                 const admins = await getAdmins(sock, from);
                 if (isUserAdmin(sender, admins)) isAllowed = true;
             }
         } catch (_) {}
         if (!isAllowed) {
-            return await sock.sendMessage(from, { text: '❌ Apenas administradores do grupo podem configurar o multiprefixo.' }, { quoted: m });
+            return await sock.sendMessage(from, { text: '❌ Apenas administradores do grupo, dono, sub-donos ou guardiões podem configurar o multiprefixo.' }, { quoted: m });
         }
 
         const showStatus = async (extra = '') => {

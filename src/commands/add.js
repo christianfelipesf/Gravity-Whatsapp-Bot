@@ -17,16 +17,27 @@ module.exports = {
         // Aceita qualquer formatação: "!add +55 13 93631-2912", "!add (13) 93631-2912",
         // "!add 13 93631-2912", "!add 5513936312912". O normalizador extrai os
         // dígitos do texto inteiro e completa o DDI 55 quando vier só DDD+número.
-        const raw = utils.normalizePhoneNumber(fullArgsText || (args || []).join(' '), { min: 10 });
+        // Dígitos de LID colado são convertidos p/ o telefone real (ver identity).
+        let raw = utils.normalizePhoneNumber(fullArgsText || (args || []).join(' '), { min: 10 });
         if (!raw) {
             return await sock.sendMessage(from, { text: '❌ Use: !add 5511999999999 (aceita +55, espaços, traços e parênteses — ex: !add +55 13 93631-2912).' }, { quoted: m });
         }
+        try {
+            const identity = require('../services/identity');
+            const r = await identity.resolveCandidateToPhone(sock, utils, raw, from);
+            if (r.phone) raw = r.phone;
+        } catch (_) {}
         const jid = `${raw}@s.whatsapp.net`;
 
         try {
             const meta = await utils.groupMetadataCached(sock, from).catch(() => null);
             const parts = Array.isArray(meta?.participants) ? meta.participants : [];
-            const exists = parts.some(p => String(p.id || '').split('@')[0].replace(/\D/g, '').endsWith(raw.slice(-11)) || String(p.id || '') === jid);
+            const identity = require('../services/identity');
+            const exists = parts.some(p => {
+                const fields = [p.id, p.jid, p.lid, p.phoneNumber, p.pn].filter(Boolean).map(String);
+                const digs = fields.map(identity.digitsOf).filter(Boolean);
+                return digs.includes(raw) || digs.some(d => d.endsWith(raw.slice(-11)));
+            });
             if (exists) {
                 return await sock.sendMessage(from, { text: 'ℹ️ Este número já está no grupo.' }, { quoted: m });
             }

@@ -49,8 +49,13 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Use: !addlogin 5511999999999\n\n💡 No privado, basta digitar *!addlogin* sem número para autorizar o contato da conversa.\nVocê também pode marcar (@) ou responder a mensagem da pessoa.' }, { quoted: m });
         }
 
-        const phone = utils.normalizeLoginPhone(String(candidate).split('@')[0] || candidate);
+        // @lid / LID colado nunca é salvo cru: pairing precisa do telefone real.
+        const identity = require('../services/identity');
+        const { phone, reason } = await identity.resolveCandidateToPhone(sock, utils, candidate, from);
         if (!phone) {
+            if (reason === 'lid-sem-telefone') {
+                return await sock.sendMessage(from, { text: '❌ Não consegui identificar o número (@lid sem telefone visível).\n\n💡 Digite o número com DDI+DDD: *!addlogin 5511999999999*' }, { quoted: m });
+            }
             return await sock.sendMessage(from, { text: '❌ Número inválido. Use: !addlogin 5511999999999' }, { quoted: m });
         }
 

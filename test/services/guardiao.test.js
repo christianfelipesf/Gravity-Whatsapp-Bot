@@ -104,8 +104,25 @@ describe('guardiao — portões de acesso', () => {
     });
 });
 
-describe('guardiao — modo parcial', () => {
-    it('gestão de guardiões é bloqueada no parcial', () => {
+describe('guardiao — entradas legadas em LID', () => {
+    it('LID salvo casa com remetente @lid (compat)', () => {
+        const LID = '151059083309097';
+        assert.strictEqual(utils.addGuardiao(LID).ok, true);
+        const m = { key: { fromMe: false, participant: `${LID}@lid` }, message: {} };
+        const r = utils.isGuardiaoSender(pvSock(), m, `${LID}@lid`, '5511888888888@g.us');
+        assert.strictEqual(r.ok, true);
+        assert.strictEqual(r.guardiao, true);
+        assert.strictEqual(utils.removeGuardiao(LID).ok, true);
+    });
+
+    it('getSenderLids extrai dígitos do @lid', () => {
+        const m = { key: { participant: '151059083309097@lid' }, message: {} };
+        assert.deepStrictEqual(utils.getSenderLids(m, '151059083309097@lid'), ['151059083309097']);
+        assert.deepStrictEqual(utils.getSenderLids(pvMsg(), '5511999999999@s.whatsapp.net'), []);
+    });
+});
+
+describe('guardiao — modo parcial', () => {    it('gestão de guardiões é bloqueada no parcial', () => {
         for (const c of ['addguardiao', 'remguardiao', 'listguardioes', 'guardioes']) {
             assert.ok(
                 partial.PARTIAL_BLOCKED_COMMANDS.has(c),

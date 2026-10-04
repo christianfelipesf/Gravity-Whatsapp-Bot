@@ -11,6 +11,7 @@ module.exports = {
         const botName = config.botName || 'Bot';
 
         // === Grupo: cada ADM altera prefixo do seu próprio grupo ===
+        // Dono, sub-dono e guardiões também podem, mesmo sem ser ADM do grupo.
         if (isGroup) {
             let isAllowed = false;
             try {
@@ -18,13 +19,19 @@ module.exports = {
                 const senderNorm = utils.normalizeJid(sender);
                 const isBotOwner = m.key.fromMe === true || sender === meId || senderNorm === meId;
                 if (isBotOwner) isAllowed = true;
-                else {
+                if (!isAllowed && typeof utils.canConfigureBot === 'function') {
+                    try { if (utils.canConfigureBot(sock, m, sender, from).ok) isAllowed = true; } catch (_) {}
+                }
+                if (!isAllowed && typeof utils.canGuardianActAsync === 'function') {
+                    try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) isAllowed = true; } catch (_) {}
+                }
+                if (!isAllowed) {
                     const admins = await getAdmins(sock, from);
                     if (isUserAdmin(sender, admins)) isAllowed = true;
                 }
             } catch (_) {}
             if (!isAllowed) {
-                return await sock.sendMessage(from, { text: '❌ Apenas administradores do grupo podem alterar o prefixo deste grupo.' }, { quoted: m });
+                return await sock.sendMessage(from, { text: '❌ Apenas administradores do grupo, dono, sub-donos ou guardiões podem alterar o prefixo deste grupo.' }, { quoted: m });
             }
 
             const raw = (args[0] || '').trim();

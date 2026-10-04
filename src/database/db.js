@@ -297,6 +297,19 @@ try {
     console.error('[database] migração antispam_default_on_v1 falhou:', e?.message || e);
 }
 
+// Retenção do histórico: teto antigo (30k ≈ 2,5 dias no ritmo atual) ->
+// 100k (≈ 7+ dias, mesma janela do dashboardHistoryHours). Só migra quem
+// está exatamente no default antigo (não mexe em valor ajustado via !set).
+try {
+    const row = db.prepare("SELECT value FROM config WHERE key = 'dashboardMaxLogs'").get();
+    if (row && Number(JSON.parse(row.value)) === 30000) {
+        db.prepare("INSERT INTO config (key, value) VALUES ('dashboardMaxLogs', '100000') ON CONFLICT(key) DO UPDATE SET value = '100000'").run();
+        console.log('🧹 [database] dashboardMaxLogs 30000 → 100000 (histórico ~7 dias)');
+    }
+} catch (e) {
+    console.error('[database] migração dashboardMaxLogs falhou:', e?.message || e);
+}
+
 // Limpeza de órfãos — DEPOIS do CREATE TABLE (antes falhava em banco novo).
 try {
     const removed = db.prepare(`

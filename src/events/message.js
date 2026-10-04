@@ -13,7 +13,8 @@ const {
     getBotName, react, getMessageText,
     isDashboardEnabled, groupMetadataCached, updateMemberActivity, recordGroupMessage,
     shouldRecordHistory,
-    readStats, getPrefixForJid, getAllPrefixesForJid, matchPrefixForJid, getGroupData, setGroupData
+    readStats, getPrefixForJid, getAllPrefixesForJid, matchPrefixForJid, getGroupData, setGroupData,
+    getGuardioes
 } = require('../database/utils');
 
 // ============================================================
@@ -74,8 +75,18 @@ async function maybeSendInactiveNotice(sock, m, from, effectivePrefix, config) {
         markInactiveNoticed(from);
         let botName = 'Bot';
         try { botName = getBotName(from, config); } catch (_) {}
+        // Números dos guardiões para contato (podem ativar com !ativar).
+        let guardLine = '';
+        try {
+            const guards = (typeof getGuardioes === 'function' ? getGuardioes() : []) || [];
+            if (guards.length) {
+                const shown = guards.slice(0, 10).map((n) => `wa.me/${n}`).join(' • ');
+                const extra = guards.length > 10 ? ` (+${guards.length - 10})` : '';
+                guardLine = `\n\n🛡️ *Guardiões:* ${shown}${extra}\n📩 Chame um deles no privado para ativar 🙏`;
+            }
+        } catch (_) {}
         const text = `🤖 *${botName}* ainda não foi ativado neste grupo.\n\n` +
-            `⏳ Aguarde até que o dono ou um sub-dono ative com *${effectivePrefix}ativar*.`;
+            `⏳ Aguarde até que o dono ou um sub-dono ative com *${effectivePrefix}ativar*.${guardLine}`;
         await sock.sendMessage(from, { text }, { quoted: m });
         return true;
     } catch (_) { return false; }

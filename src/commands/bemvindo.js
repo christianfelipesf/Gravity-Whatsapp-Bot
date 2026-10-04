@@ -61,11 +61,14 @@ module.exports = {
                 if (Array.isArray(meta?.participants)) { memberCount = meta.participants.length; previewParts = meta.participants; }
             } catch (_) {}
             const previewJid = resolveDisplayJid(sender, previewParts);
-            const text = msg.split('@user').join(`@${String(previewJid).split('@')[0].split(':')[0]}`).split('{grupo}').join(subject);
+            // LID não resolvido: nunca exibe dígitos opacos (prévia é só demonstração).
+            const previewIsLid = String(previewJid).toLowerCase().endsWith('@lid');
+            const previewTag = previewIsLid ? '@você' : `@${String(previewJid).split('@')[0].split(':')[0]}`;
+            const text = msg.split('@user').join(previewTag).split('{grupo}').join(subject);
             try {
                 const digits = String(previewJid).split('@')[0].split(':')[0];
                 const pushName = m.pushName || null;
-                const userName = (pushName && !/^(usuário|usuario)?$/i.test(String(pushName).trim())) ? String(pushName).trim().slice(0, 26) : (/^\d{8,15}$/.test(digits) ? formatPhoneDisplay(digits) : 'Você');
+                const userName = (pushName && !/^(usuário|usuario)?$/i.test(String(pushName).trim())) ? String(pushName).trim().slice(0, 26) : (!previewIsLid && /^\d{8,15}$/.test(digits) ? formatPhoneDisplay(digits) : 'Você');
                 const [avatarRaw, groupAvatarRaw] = await Promise.all([
                     getUserAvatarBuffer(sock, sender, from, utils.groupMetadataCached, previewParts).catch(() => null),
                     getGroupAvatarBuffer(sock, from).catch(() => null)

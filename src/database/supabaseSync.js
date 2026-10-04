@@ -325,8 +325,15 @@ async function pullFromCloud({ log = console } = {}) {
             const ins = localDb.prepare(`INSERT OR REPLACE INTO "${table}" (${quoted}) VALUES (${placeholders})`);
             const list = cloudRows.map(r => _normRow(table, r, cols));
             if (cap) list.reverse();
+            // Tabelas volumosas de histórico (messages/dashboard_logs/...): MERGE,
+            // não wipe. O PULL com cap traz só os N mais recentes da nuvem — um
+            // DELETE local apagaria o excedente que só existe no bot.db (ex.:
+            // local com 80k, nuvem com 30k). O teto é aplicado depois via trim.
+            // Deletes intencionais (clearChatHistory) vão por caminho explícito
+            // (_msgPendingCloudDelete) e não dependem do PULL.
+            const isCappedHistory = !!cap;
             const tx = localDb.transaction((arr) => {
-                del.run();
+                if (!isCappedHistory) del.run();
                 for (const r of arr) ins.run(cols.map(c => (r[c] === undefined ? null : r[c])));
             });
             tx(list);
@@ -339,6 +346,10 @@ async function pullFromCloud({ log = console } = {}) {
         try { require('./utils').reconcileActivePartial(localDb); } catch (e) {
             try { log.log(`⚠️ [supabase] reconcile total/parcial falhou (segue): ${e?.message || e}`); } catch (_) {}
         }
+        // Pós-PULL: uniformiza tetos locais (o merge acima pode trazer grupos
+        // de messages acima do summaryLimit; o trim de logs usa history*).
+        try { require('./utils').trimMessagesToLimit?.(); } catch (_) {}
+        try { require('../history/store').runHistoryTrimOnce?.(false); } catch (_) {}
         try { localDb.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
         _lastPullAt = Date.now();
         _pullOk = true;

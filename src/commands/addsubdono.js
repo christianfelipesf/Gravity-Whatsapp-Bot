@@ -14,9 +14,8 @@ module.exports = {
         }
 
         // Extrai candidato: prioriza dígitos digitados (à prova de @lid).
-        // Menção (@) ou citação em grupo com privacidade LID resolve para ID
-        // opaco — gravar isso no subOwners quebra o match depois. Por isso:
-        // 1) se o texto tem dígitos, usa os dígitos; 2) menção @lid é rejeitada.
+        // @lid / LID colado nunca é salvo cru: resolve para o telefone real
+        // via identity.resolveCandidateToPhone antes de gravar.
         let candidate = null;
         let mentionedRaw = null;
         try {
@@ -40,9 +39,7 @@ module.exports = {
             }
         }
         if (!candidate && mentionedRaw) {
-            if (String(mentionedRaw).endsWith('@lid')) {
-                return await sock.sendMessage(from, { text: '❌ Não consegui identificar o número (menção @lid sem telefone visível).\n\n💡 Use: !addsubdono 5598989138217 (digite o número com DDI+DDD).' }, { quoted: m });
-            }
+            // @lid nunca é salvo cru: resolve para o telefone real (ver identity).
             candidate = mentionedRaw;
         }
 
@@ -50,8 +47,12 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Use: !addsubdono 5598989138217\n\n💡 Você também pode marcar (@) ou responder a mensagem da pessoa.' }, { quoted: m });
         }
 
-        const phone = utils.normalizePhoneNumber(String(candidate).split('@')[0] || candidate);
+        const identity = require('../services/identity');
+        const { phone, reason } = await identity.resolveCandidateToPhone(sock, utils, candidate, from);
         if (!phone) {
+            if (reason === 'lid-sem-telefone') {
+                return await sock.sendMessage(from, { text: '❌ Não consegui identificar o número (menção @lid sem telefone visível).\n\n💡 Use: !addsubdono 5598989138217 (digite o número com DDI+DDD).' }, { quoted: m });
+            }
             return await sock.sendMessage(from, { text: '❌ Número inválido. Use: !addsubdono 5598989138217' }, { quoted: m });
         }
 

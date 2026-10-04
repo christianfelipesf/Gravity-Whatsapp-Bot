@@ -61,14 +61,31 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Use: !removerlogin 5511999999999\n\n💡 No privado, basta digitar *!removerlogin* sem número para remover o contato da conversa.\nOu *!removerlogin all* para remover todos.\nVeja a lista com *!listalogins*.' }, { quoted: m });
         }
 
-        const phone = utils.normalizeLoginPhone(String(candidate).split('@')[0] || candidate);
+        const identity = require('../services/identity');
+        let { phone, reason } = await identity.resolveCandidateToPhone(sock, utils, candidate, from);
         if (!phone) {
-            return await sock.sendMessage(from, { text: '❌ Número inválido. Use: !removerlogin 5511999999999' }, { quoted: m });
+            // Sem resolução (ex: @lid sem telefone visível): tenta o bruto para
+            // ao menos dar a mensagem de erro correta em vez de salvar LID.
+            const raw = utils.normalizeLoginPhone
+                ? utils.normalizeLoginPhone(String(candidate).split('@')[0] || candidate)
+                : null;
+            if (!raw) {
+                return await sock.sendMessage(from, { text: '❌ Número inválido. Use: !removerlogin 5511999999999' }, { quoted: m });
+            }
+            phone = raw;
         }
 
         let currentBotResponse = await react(sock, m, '➖', lastBotResponse, GLOBAL_COOLDOWN);
 
-        const res = utils.removeLoginAllowed(phone);
+        let res = utils.removeLoginAllowed(phone);
+        // Compat LID: cruza telefone<->LID via metadados (ver identity).
+        if (!res.ok && res.error === 'não encontrado') {
+            try {
+                const stored = (utils.listLoginAllowed ? utils.listLoginAllowed() : []).map((r) => r.phone);
+                const match = await identity.findStoredMatch(sock, utils, stored, phone, from);
+                if (match) res = utils.removeLoginAllowed(match);
+            } catch (_) {}
+        }
         if (!res.ok) {
             if (res.error === 'não encontrado') {
                 await sock.sendMessage(from, { text: `ℹ️ O número *${phone}* não está na lista de autorizados.\nVeja com *!listalogins*.` }, { quoted: m });

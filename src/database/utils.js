@@ -142,6 +142,44 @@ function clearBlacklist(groupJid) {
     try { const r = _blClear.run(groupJid); if (r.changes) _pushSoon(); return r.changes; } catch (_) { return 0; }
 }
 
+// Remoção alias-aware: tenta cada JID (telefone e/ou LID) até remover.
+function removeFromBlacklistAny(groupJid, userJids) {
+    if (!groupJid) return false;
+    const cands = (Array.isArray(userJids) ? userJids : [userJids]).filter(Boolean);
+    let removed = false;
+    try {
+        for (const j of cands) {
+            try { if (removeFromBlacklist(groupJid, j)) removed = true; } catch (_) {}
+        }
+    } catch (_) {}
+    return removed;
+}
+
+// Variante alias-aware: casa qualquer um dos JIDs (telefone e/ou LID).
+// Use com a lista de aliases de identity (ou [jid] para o comportamento antigo).
+function isBlacklistedAny(groupJid, userJids) {
+    if (!groupJid) return false;
+    const cands = (Array.isArray(userJids) ? userJids : [userJids]).filter(Boolean);
+    if (!cands.length) return false;
+    try {
+        for (const j of cands) {
+            const norm = normalizeBlacklistJid(j);
+            if (norm && _blHas.get(groupJid, norm)) return true;
+        }
+        const users = new Set(cands.map((j) => {
+            const n = normalizeBlacklistJid(j);
+            return n ? n.split('@')[0] : null;
+        }).filter(Boolean));
+        if (!users.size) return false;
+        const rows = _blGetAll.all(groupJid);
+        for (const r of rows) {
+            const norm = normalizeBlacklistJid(r.user_jid);
+            if (norm && users.has(norm.split('@')[0])) return true;
+        }
+        return false;
+    } catch (_) { return false; }
+}
+
 function countBlacklist(groupJid) {
     if (!groupJid) return 0;
     try { const row = _blCount.get(groupJid); return row ? row.c : 0; } catch (_) { return 0; }
@@ -259,6 +297,12 @@ function canUseLogin(sock, m, sender, from) {
     for (const p of phones) {
         if (isLoginAllowed(p)) return { ok: true, owner: false, phone: p };
     }
+    // Compat: entradas legadas salvas como LID casam direto com o @lid.
+    try {
+        for (const l of getSenderLids(m, sender)) {
+            if (isLoginAllowed(l)) return { ok: true, owner: false, phone: l };
+        }
+    } catch (_) {}
     return { ok: false, owner: false };
 }
 
@@ -296,6 +340,12 @@ function isSubOwnerSender(sock, m, sender, from) {
         for (const p of phones) {
             if (subs.includes(p)) return { ok: true, owner: false, sub: true, phone: p };
         }
+        // Compat: entradas legadas salvas como LID casam direto com o @lid.
+        try {
+            for (const l of getSenderLids(m, sender)) {
+                if (subs.includes(l)) return { ok: true, owner: false, sub: true, phone: l };
+            }
+        } catch (_) {}
         return { ok: false, owner: false, sub: false };
     } catch (_) { return { ok: false, owner: false, sub: false }; }
 }
@@ -367,6 +417,60 @@ async function resolvePhoneLidInGroup(sock, phoneUser, groupJid) {
             if (lidC) return lidC;
             return null;
         } catch (_) {}
+    }
+    return null;
+}
+// Coleta LIDs do remetente (dígitos opacos do @lid). Usado para casar com
+// entradas legadas salvas como LID (ex: guardiões adicionados via @lid).
+function getSenderLids(m, sender) {
+    const out = [];
+    const push = (v) => {
+        if (!v || !String(v).toLowerCase().endsWith('@lid')) return;
+        const d = String(v).split('@')[0].split(':')[0].replace(/\D/g, '');
+        if (d && !out.includes(d)) out.push(d);
+    };
+    try {
+        push(sender);
+        push(m?.key?.participant);
+        const ctx = m?.message?.extendedTextMessage?.contextInfo
+            || m?.message?.imageMessage?.contextInfo
+            || m?.message?.videoMessage?.contextInfo;
+        push(ctx?.participant);
+        if (Array.isArray(ctx?.mentionedJid)) for (const j of ctx.mentionedJid) push(j);
+    } catch (_) {}
+    return out;
+}
+
+// Resolve LID -> telefone varrendo metadados de grupos (atual primeiro).
+// Retorna dígitos do telefone ou null. Limitado a maxGroups p/ não travar comando.
+async function resolveLidToPhoneInGroups(sock, lidDigits, groupJids, opts = {}) {
+    const want = String(lidDigits || '').replace(/\D/g, '');
+    if (!want || !sock) return null;
+    const groups = (Array.isArray(groupJids) ? groupJids : []).filter((j) => String(j).endsWith('@g.us'));
+    if (!groups.length) return null;
+    const max = Math.max(1, Math.min(40, Number(opts.maxGroups) || 15));
+    let checked = 0;
+    for (const gjid of groups) {
+        if (checked >= max) break;
+        checked++;
+        let meta = null;
+        try { meta = await groupMetadataCached(sock, gjid); } catch (_) { continue; }
+        const parts = meta?.participants || [];
+        for (const p of parts) {
+            try {
+                const ids = [p?.id, p?.jid, p?.lid].filter(Boolean).map(String);
+                const hit = ids.some((id) => String(id).split('@')[0].split(':')[0].replace(/\D/g, '') === want);
+                if (!hit) continue;
+                // Telefone pode estar em phoneNumber/pn OU no próprio id/jid
+                // (Baileys novo: id = telefone@s.whatsapp.net + lid separado).
+                const cands = [p?.phoneNumber, p?.pn, p?.id, p?.jid].filter(Boolean).map(String);
+                for (const c of cands) {
+                    if (String(c).toLowerCase().endsWith('@lid')) continue;
+                    const d = normalizePhoneNumber(String(c).split('@')[0] || c);
+                    if (d) return d;
+                }
+            } catch (_) {}
+        }
     }
     return null;
 }
@@ -450,8 +554,8 @@ function removeSubOwner(phoneOrJid) {
 
 // ============================================================
 // Guardiões (!addguardiao / !remguardiao) — papel LIMITADO:
-// só !ativar/!desativar/!ativarp/!desativarp, !news ativar/desativar
-// e !aidono. NUNCA !set/!config/chaves API (não passam em
+// !ativar/!desativar/!ativarp/!desativarp, !news ativar/desativar,
+// !aidono e !autoresponder on/off. NUNCA !set/!config/chaves API (não passam em
 // canConfigureBot de propósito). Armazenado em config.guardioes.
 // Gerenciados pelo dono real E por sub-donos.
 // ============================================================
@@ -484,6 +588,13 @@ function isGuardiaoSender(sock, m, sender, from) {
         for (const p of phones) {
             if (list.includes(p)) return { ok: true, owner: false, guardiao: true, phone: p };
         }
+        // Compat: entradas legadas salvas como LID casam direto com o @lid.
+        try {
+            const lids = getSenderLids(m, sender);
+            for (const l of lids) {
+                if (list.includes(l)) return { ok: true, owner: false, guardiao: true, phone: l };
+            }
+        } catch (_) {}
         return { ok: false, owner: false, guardiao: false };
     } catch (_) { return { ok: false, owner: false, guardiao: false }; }
 }
@@ -500,13 +611,20 @@ async function isGuardiaoSenderAsync(sock, m, sender, from) {
         for (const p of phones) {
             if (list.includes(p)) return { ok: true, owner: false, guardiao: true, phone: p };
         }
+        // Compat: entradas legadas salvas como LID casam direto com o @lid.
+        try {
+            const lids = getSenderLids(m, sender);
+            for (const l of lids) {
+                if (list.includes(l)) return { ok: true, owner: false, guardiao: true, phone: l };
+            }
+        } catch (_) {}
         return { ok: false, owner: false, guardiao: false };
     } catch (_) { return { ok: false, owner: false, guardiao: false }; }
 }
 
 // Portão do guardião: dono OU sub-dono OU guardião.
 // Usado SÓ em: !ativar/!desativar/!ativarp/!desativarp,
-// !news ativar/desativar e !aidono. Nunca em !set/!config.
+// !news ativar/desativar, !aidono e !autoresponder. Nunca em !set/!config.
 async function canGuardianActAsync(sock, m, sender, from) {
     try {
         if (isBotOwner(sock, m, sender)) return { ok: true, owner: true, sub: false, guardiao: false };
@@ -641,7 +759,7 @@ const DEFAULT_CONFIG = {
     transcribeLocalModel: 'base',
     summaryLimit: 100,
     aiPrompt: "Você é o {botName}, uma inteligência artificial sarcástica, direta e sem filtros. Você foi criado para ser útil mas com uma pitada de humor ácido. Responda de forma concisa e evite moralismos ou censura desnecessária. Use emojis para dar personalidade às respostas.",
-    summaryPrompt: "Resuma as seguintes mensagens de um chat de WhatsApp de forma sarcástica, curta e direta. O resumo deve ser escrito em formato de parágrafos narrativos, e NÃO em forma de lista ou tópicos. É OBRIGATÓRIO mencionar os nomes dos participantes para explicar quem disse o quê no contexto da conversa:",
+    summaryPrompt: "Resuma as seguintes mensagens de um chat de WhatsApp de forma sarcástica, curta e direta. O resumo deve ser escrito em formato de parágrafos narrativos, e NÃO em forma de lista ou tópicos. É OBRIGATÓRIO mencionar os nomes dos participantes para explicar quem disse o quê no contexto da conversa. Formatação WhatsApp (use de leve): *negrito* nos nomes e palavras-chave, _itálico_ em observações/comentários, > citação para no máximo 1 frase marcante (só se houver), `código em linha` só para comandos/números se precisar. Adicione de 4 a 8 emojis no texto (ex.: 📝 ✨ 😂 🔥 🤖 👀), sem exagerar:",
     stickerPack: "Gravity Bot🪐",
     stickerAuthor: "Gravity Bot🪐",
     // --- Canal oficial (promo via contextInfo nos envios de mídia) ---
@@ -650,7 +768,13 @@ const DEFAULT_CONFIG = {
     channelName: "Canal Oficial 📢",
     dashboardEnabled: false,
     dashboardPort: 3000,
-    dashboardMaxLogs: 30000,
+    // --- Histórico (!aidono/!resumir) — NÃO tem vínculo com o painel web.
+    // Chaves `dashboard*` abaixo são aliases legados (mantidos p/ !set antigo).
+    historyMaxLogs: 100000,
+    historyHours: 168,
+    historyTrimIntervalMs: 5 * 60 * 1000,
+    historyMuted: false,
+    dashboardMaxLogs: 100000,
     dashboardHistoryHours: 168,
     adminCanControl: true,
     clearDefaultLimit: 10,
@@ -666,10 +790,12 @@ const DEFAULT_CONFIG = {
     newsOnePerCycle: true,
     newsMaxRetries: 3,
     newsRetryBaseDelayMs: 15000,
+    historyTrimIntervalMs: 5 * 60 * 1000,
     dashboardTrimIntervalMs: 60 * 1000,
     maxMediaDurationSeconds: 900,
     maxDownloadSizeMB: 100,
     subSessionsGroups: true,
+    historyMuted: false,
     dashboardMuted: false,
     dashboardShowQR: false,
     dashboardChatBlocked: true,
@@ -680,6 +806,9 @@ const DEFAULT_CONFIG = {
     splashInterval: 60,
     splashWithImage: true,
     splashCooldownMs: 21600000,
+    // --- Chamadas e menções (não incomodar o dono) ---
+    rejectCalls: true,
+    tagOwnerOnMod: false,
     // --- Modo Humanizado / Anti-ban (default LIGADO) ---
     humanMode: true,
     humanMinDelayMs: 1200,
@@ -710,9 +839,33 @@ function readConfig() {
         try { dbConfig[r.key] = JSON.parse(r.value); } catch { dbConfig[r.key] = r.value; }
     }
     const merged = { ...DEFAULT_CONFIG, ...dbConfig, openrouterApiKey: process.env.OPENROUTER_API_KEY || '' };
+    // Histórico desvinculado do painel: `history*` é a fonte da verdade.
+    // `dashboard*` é alias legado — só usado quando o `history*`
+    // correspondente não foi gravado no banco (bancos antigos / !set antigo).
+    try {
+        const has = (k) => Object.prototype.hasOwnProperty.call(dbConfig, k);
+        if (!has('historyMaxLogs')) merged.historyMaxLogs = merged.dashboardMaxLogs ?? DEFAULT_CONFIG.historyMaxLogs;
+        if (!has('historyHours')) merged.historyHours = merged.dashboardHistoryHours ?? DEFAULT_CONFIG.historyHours;
+        if (!has('historyTrimIntervalMs')) merged.historyTrimIntervalMs = merged.dashboardTrimIntervalMs ?? DEFAULT_CONFIG.historyTrimIntervalMs;
+        if (!has('historyMuted')) merged.historyMuted = merged.dashboardMuted ?? DEFAULT_CONFIG.historyMuted;
+    } catch (_) {}
     _configCache = merged;
     _configCacheTs = now;
     return { ...merged };
+}
+
+// Limites efetivos do histórico (fonte única p/ trim + !aidono).
+function getHistoryLimits() {
+    try {
+        const cfg = readConfig();
+        const maxRows = Math.max(1000, Number(cfg?.historyMaxLogs) || 100000);
+        const hours = Math.max(1, Number(cfg?.historyHours) || 168);
+        const intervalMs = Math.max(30 * 1000, Number(cfg?.historyTrimIntervalMs) || 5 * 60 * 1000);
+        const muted = (cfg?.historyMuted ?? cfg?.dashboardMuted) === true;
+        return { maxRows, maxAgeMs: hours * 3600 * 1000, hours, intervalMs, muted };
+    } catch (_) {
+        return { maxRows: 100000, maxAgeMs: 168 * 3600 * 1000, hours: 168, intervalMs: 5 * 60 * 1000, muted: false };
+    }
 }
 
 function _invalidateConfigCache() { _configCache = null; _configCacheTs = 0; }
@@ -880,7 +1033,10 @@ function deactivateGroup(jid) {
     try { _activityBuffer.delete(jid); } catch (_) {}
     try { _agpDelete.run(jid); } catch (_) {}
     try { _afDelete.run(jid); } catch (_) {}
-    clearChatHistory(jid);
+    // TRAVA: histórico (messages/dashboard_logs) é PRESERVADO de propósito.
+    // !desativar só desliga o bot, não apaga resumos nem evidências do !aidono.
+    // NUNCA chamar clearChatHistory() aqui (apagar é só via comando explícito
+    // de limpeza, que propaga o delete p/ nuvem via _msgPendingCloudDelete).
     muteApi.clearMuted(jid);
     return true;
 }
@@ -1349,6 +1505,33 @@ function trimDashboardLogs({ maxAgeMs = 0, maxRows = 5000 } = {}) {
 }
 
 function countDashboardLogs() { try { return _dlCount.get().c; } catch (_) { return 0; } }
+
+// Janela real do histórico (p/ !aidono anunciar número honesto, não "7 dias" fixo).
+function getHistoryStats() {
+    try {
+        const c = countDashboardLogs();
+        let oldest = 0, newest = 0;
+        try {
+            const r = db.prepare('SELECT MIN(timestamp) AS oldest, MAX(timestamp) AS newest FROM dashboard_logs').get();
+            oldest = Number(r?.oldest) || 0;
+            newest = Number(r?.newest) || 0;
+        } catch (_) {}
+        const { hours, maxRows } = getHistoryLimits();
+        return { count: c, oldest, newest, hours, maxRows };
+    } catch (_) {
+        return { count: 0, oldest: 0, newest: 0, hours: 168, maxRows: 100000 };
+    }
+}
+
+function getHistoryWindowLabel() {
+    try {
+        const s = getHistoryStats();
+        const days = (s.hours / 24).toFixed(s.hours % 24 === 0 ? 0 : 1).replace('.', ',');
+        return `histórico retido: até ${s.hours}h (~${days} dias, teto ${Number(s.maxRows).toLocaleString('pt-BR')} logs)`;
+    } catch (_) {
+        return 'histórico retido: até 168h (~7 dias)';
+    }
+}
 
 function updateDashboardLogReactions(toJid, messageId, type, reactions) {
     if (!toJid || !messageId) return false;
@@ -2256,6 +2439,38 @@ function getChatHistory(jid, limit = 20) {
     try { const rows = _msgSelectByJid.all(jid, limit); return rows.reverse(); } catch (e) { return []; }
 }
 
+// Apara `messages` por grupo até `summaryLimit`. O flush normal só apara os
+// jids que receberam escrita — re-semeadura via PULL (DELETE+INSERT) pula esse
+// caminho e deixa grupos com milhares de linhas. Chamar no boot / pós-PULL.
+function trimMessagesToLimit(limitOverride) {
+    let limit = Number(limitOverride);
+    if (!Number.isFinite(limit) || limit <= 0) {
+        try { limit = Number(readConfig().summaryLimit) || 100; } catch (_) { limit = 100; }
+    }
+    limit = Math.max(1, Math.floor(limit));
+    try {
+        flushMessagesSync();
+        const rows = db.prepare('SELECT jid, COUNT(*) AS c FROM messages GROUP BY jid HAVING c > ?').all(limit);
+        if (!rows.length) return { groups: 0, removed: 0 };
+        let removed = 0;
+        const tx = db.transaction((list) => {
+            for (const r of list) {
+                try {
+                    const res = _msgTrimByJid.run(r.jid, r.jid, limit);
+                    removed += Number(res?.changes) || 0;
+                } catch (_) {}
+            }
+        });
+        tx(rows);
+        if (removed > 20) { try { db.pragma('incremental_vacuum(200)'); } catch (_) {} }
+        if (removed > 0) console.log(`🧹 [history] messages: ${removed} linha(s) acima do teto aparadas em ${rows.length} grupo(s) (teto=${limit})`);
+        return { groups: rows.length, removed };
+    } catch (e) {
+        console.error('❌ [messages] trim retroativo:', e?.message || e);
+        return { groups: 0, removed: 0 };
+    }
+}
+
 const _msgClearByJid = db.prepare('DELETE FROM messages WHERE jid = ?');
 const _msgMaxTimeByJid = db.prepare('SELECT MAX(time) AS t FROM messages WHERE jid = ?');
 // Deletes de messages ainda não confirmados na nuvem (jid -> cutoff time ms).
@@ -2859,17 +3074,20 @@ module.exports = {
     sendMessageSafe, groupMetadataCached, clearGroupMetadataCache,
     canAdminControl,
     ...muteApi,
-    getBlacklist, isBlacklisted, addToBlacklist, removeFromBlacklist, clearBlacklist, countBlacklist, parseNumberToJid, normalizeBlacklistJid, normalizePhoneNumber, extractPhoneFromText,
+    getBlacklist, isBlacklisted, isBlacklistedAny, addToBlacklist, removeFromBlacklist, removeFromBlacklistAny, clearBlacklist, countBlacklist, parseNumberToJid, normalizeBlacklistJid, normalizePhoneNumber, extractPhoneFromText,
     normalizeLoginPhone, isLoginAllowed, listLoginAllowed, addLoginAllowed, removeLoginAllowed, clearLoginAllowed,
     getSenderLoginPhones, isBotOwner, canUseLogin,
     getSubOwners, isSubOwnerPhone, isSubOwnerSender, canConfigureBot, addSubOwner, removeSubOwner,
     getGuardioes, isGuardiaoPhone, isGuardiaoSender, isGuardiaoSenderAsync, canGuardianActAsync, addGuardiao, removeGuardiao,
     resolveLidPhoneInGroup, resolvePhoneLidInGroup, resolveSenderPhonesAsync, isSubOwnerSenderAsync, canActivateBotAsync,
+    getSenderLids, resolveLidToPhoneInGroups,
     getAntifloodConfig, setAntifloodConfig, toggleAntiflood, toggleAntifloodAdmin,
     isDashboardEnabled, setDashboardEnabled, listDashboardGroups, getDashboardPreference,
     isNewsEnabled, setNewsEnabled, listNewsGroups,
     getNewsState, setNewsState, clearNewsState, clearAllNewsState,
     insertDashboardLog, loadDashboardHistory, trimDashboardLogs, countDashboardLogs,
+    getHistoryLimits, getHistoryStats, getHistoryWindowLabel,
+    trimMessagesToLimit,
     updateDashboardLogReactions, updateDashboardLogMedia, selectDashboardLogsWithInlineMedia,
     clearDashboardLogs, deleteDashboardLogsByJid, getDashboardLogByMessageId,
     getMessagesBySender, getMessagesByGroup, getRecentLogs, findPeopleByName,

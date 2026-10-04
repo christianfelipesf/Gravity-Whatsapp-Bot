@@ -15,19 +15,43 @@ module.exports = {
         }
 
         const p = config.prefix || '!';
+        const identity = require('../services/identity');
         const blacklist = utils.getBlacklist(from);
 
-        function formatList() {
-            if (!blacklist.length) return '_Lista vazia — nenhum número na lista negra._';
-            return blacklist.map((row, i) => {
-                const num = row.user_jid.split('@')[0];
-                return `${i + 1}. ${num}`;
-            }).join('\n');
+        // Aliases telefone<->LID do alvo (p/ checar a lista em qualquer formato).
+        async function aliasOf(jid) {
+            try {
+                const k = await identity.targetKeys(sock, utils, from, jid);
+                if (k && Array.isArray(k.all) && k.all.length) return k.all;
+            } catch (_) {}
+            return [jid];
         }
 
-        function helpText() {
-            return `*🚫 Lista Negra — ${blacklist.length} número(s)*\n` +
-                `_${formatList()}_\n\n` +
+        // Rótulo seguro p/ exibição (nome > telefone formatado; nunca LID/JID cru).
+        async function labelOf(jid) {
+            try {
+                return await identity.personLabel(sock, utils, from, jid);
+            } catch (_) {
+                return identity.digitsOf(jid) || 'membro';
+            }
+        }
+        async function listLines(rows) {
+            const out = [];
+            for (let i = 0; i < rows.length; i++) {
+                out.push(`${i + 1}. ${await labelOf(rows[i].user_jid)}`);
+            }
+            return out;
+        }
+
+        async function formatListAsync(rows) {
+            const list = Array.isArray(rows) ? rows : utils.getBlacklist(from);
+            if (!list.length) return '_Lista vazia — nenhum número na lista negra._';
+            return (await listLines(list)).join('\n');
+        }
+
+        async function helpText() {
+            return `*🚫 Lista Negra — ${utils.getBlacklist(from).length} número(s)*\n` +
+                `_${await formatListAsync()}_\n\n` +
                 `╭─── *COMO USAR* ───\n` +
                 `│ 📋 *${p}listanegra* — mostra esta lista e instruções\n` +
                 `│ ➕ *${p}listanegra @usuario* — marca/menciona para banir e adicionar à lista\n` +
@@ -43,7 +67,7 @@ module.exports = {
 
         // Sem argumentos -> mostra instruções + lista
         if (!args || args.length === 0) {
-            return await sock.sendMessage(from, { text: helpText() }, { quoted: m });
+            return await sock.sendMessage(from, { text: await helpText() }, { quoted: m });
         }
 
         const lowerArgs = args.map(a => String(a).toLowerCase());
@@ -105,7 +129,13 @@ module.exports = {
                     ? utils.normalizePhoneNumber(part)
                     : utils.parseNumberToJid(part)?.split('@')[0];
                 if (digits) {
-                    const jid = `${digits}@s.whatsapp.net`;
+                    // Dígitos digitados podem ser um LID colado: converte p/ telefone.
+                    let phone = digits;
+                    try {
+                        const r = await identity.resolveCandidateToPhone(sock, utils, digits, from);
+                        if (r.phone) phone = r.phone;
+                    } catch (_) {}
+                    const jid = `${phone}@s.whatsapp.net`;
                     if (jid) pushTarget(jid);
                 }
             }
@@ -114,7 +144,13 @@ module.exports = {
             if (targets.length === 0) {
                 for (const tok of cleaned.split(/\s+/)) {
                     const digits = utils.normalizePhoneNumber ? utils.normalizePhoneNumber(tok, { min: 10 }) : null;
-                    if (digits) pushTarget(`${digits}@s.whatsapp.net`);
+                    if (!digits) continue;
+                    let phone = digits;
+                    try {
+                        const r = await identity.resolveCandidateToPhone(sock, utils, digits, from);
+                        if (r.phone) phone = r.phone;
+                    } catch (_) {}
+                    pushTarget(`${phone}@s.whatsapp.net`);
                 }
             }
         }
@@ -126,23 +162,31 @@ module.exports = {
             }
             let removedCount = 0;
             let notFoundCount = 0;
-            const notFoundNumbers = [];
+            const notFoundLabels = [];
             for (const t of targets) {
-                const ok = utils.removeFromBlacklist(from, t);
+                // Tenta o JID direto + aliases (telefone<->LID).
+                let aliases = [t];
+                try {
+                    const k = await identity.targetKeys(sock, utils, from, t);
+                    if (k && Array.isArray(k.all) && k.all.length) aliases = k.all;
+                } catch (_) {}
+                const ok = typeof utils.removeFromBlacklistAny === 'function'
+                    ? utils.removeFromBlacklistAny(from, aliases)
+                    : utils.removeFromBlacklist(from, t);
                 if (ok) removedCount++;
-                else { notFoundCount++; notFoundNumbers.push(t.split('@')[0]); }
+                else { notFoundCount++; notFoundLabels.push(await labelOf(t)); }
             }
             let msg = '';
             if (removedCount > 0) msg += `✅ ${removedCount} número(s) removido(s) da lista negra.\n`;
-            if (notFoundCount > 0) msg += `ℹ️ ${notFoundCount} não estava(m) na lista: ${notFoundNumbers.join(', ')}\n`;
-            msg += `\n*Lista atual:* ${utils.getBlacklist(from).length} número(s)\n${utils.getBlacklist(from).length ? utils.getBlacklist(from).map((r,i)=> `${i+1}. ${r.user_jid.split('@')[0]}`).join('\n') : '_vazia_'}`;
+            if (notFoundCount > 0) msg += `ℹ️ ${notFoundCount} não estava(m) na lista: ${notFoundLabels.join(', ')}\n`;
+            msg += `\n*Lista atual:* ${utils.getBlacklist(from).length} número(s)\n${await formatListAsync()}`;
             return await sock.sendMessage(from, { text: msg.trim() }, { quoted: m });
         }
 
         // Caso contrário: intenção de adicionar à lista negra + banir
         if (targets.length === 0) {
             // Nenhum alvo válido mas tem args — mostra help + lista
-            return await sock.sendMessage(from, { text: `❌ Você precisa *marcar*, *citar* (responder mensagem) ou *digitar o número* para adicionar à lista negra.\n\n` + helpText() }, { quoted: m });
+            return await sock.sendMessage(from, { text: `❌ Você precisa *marcar*, *citar* (responder mensagem) ou *digitar o número* para adicionar à lista negra.\n\n` + await helpText() }, { quoted: m });
         }
 
         const isBotAdmin = await utils.botIsAdmin(sock, from);
@@ -152,9 +196,21 @@ module.exports = {
         const participantsSet = new Set();
         if (metadata && Array.isArray(metadata.participants)) {
             for (const pinfo of metadata.participants) {
-                const pid = pinfo.id || pinfo.jid || '';
-                if (pid) participantsSet.add(utils.normalizeJid(pid).split('@')[0]);
+                for (const f of [pinfo.id, pinfo.jid, pinfo.lid, pinfo.phoneNumber, pinfo.pn]) {
+                    if (!f) continue;
+                    const d = identity.digitsOf(f);
+                    if (d) participantsSet.add(d);
+                }
             }
+        }
+        // Está no grupo? (casa por qualquer formato: telefone ou LID)
+        async function isInGroup(t) {
+            try {
+                for (const a of await aliasOf(t)) {
+                    if (participantsSet.has(identity.digitsOf(a))) return true;
+                }
+            } catch (_) {}
+            return false;
         }
 
         let added = 0;
@@ -169,14 +225,17 @@ module.exports = {
             // Não permite adicionar admin
             if (utils.isUserAdmin(t, admins)) {
                 adminSkipped++;
-                adminNumbers.push(t.split('@')[0]);
+                adminNumbers.push(await labelOf(t));
                 continue;
             }
-            if (utils.isBlacklisted(from, t)) {
+            const alreadyListed = typeof utils.isBlacklistedAny === 'function'
+                ? utils.isBlacklistedAny(from, await aliasOf(t))
+                : utils.isBlacklisted(from, t);
+            if (alreadyListed) {
                 already++;
-                alreadyNumbers.push(t.split('@')[0]);
+                alreadyNumbers.push(await labelOf(t));
                 // Mesmo já estando na lista, tenta banir se ainda estiver no grupo
-                if (isBotAdmin && participantsSet.has(t.split('@')[0])) {
+                if (isBotAdmin && await isInGroup(t)) {
                     try {
                         await sock.groupParticipantsUpdate(from, [t], 'remove');
                         kicked++;
@@ -187,9 +246,9 @@ module.exports = {
             const ok = utils.addToBlacklist(from, t, sender);
             if (ok) {
                 added++;
-                addedNumbers.push(t.split('@')[0]);
+                addedNumbers.push(await labelOf(t));
                 // Tenta banir instantaneamente se estiver no grupo
-                if (isBotAdmin && participantsSet.has(t.split('@')[0])) {
+                if (isBotAdmin && await isInGroup(t)) {
                     try {
                         await sock.groupParticipantsUpdate(from, [t], 'remove');
                         kicked++;
@@ -208,7 +267,7 @@ module.exports = {
         if (added > 0 && !isBotAdmin) response += `⚠️ Bot não é admin — não foi possível banir agora, mas o auto-ban funcionará quando o bot for promovido e o usuário tentar voltar.\n`;
         if (added > 0 || already > 0) {
             const curList = utils.getBlacklist(from);
-            response += `\n*Lista negra atual (${curList.length}):*\n${curList.map((r,i)=> `${i+1}. ${r.user_jid.split('@')[0]}`).join('\n')}`;
+            response += `\n*Lista negra atual (${curList.length}):*\n${await formatListAsync(curList)}`;
         }
 
         if (!response) response = '❌ Nenhum número válido processado.';

@@ -2,7 +2,7 @@ module.exports = {
     name: 'addguardiao',
     aliases: ['addguardian', 'adicionarguardiao', 'setguardiao'],
     category: 'admin',
-    description: 'Dá poder de guardião: ativar/desativar, modo parcial, news e aidono. Dono e sub-donos.',
+    description: 'Dá poder de guardião: ativar/desativar, modo parcial, news, aidono e autoresponder. Dono e sub-donos.',
     async execute(sock, m, { from, sender, args, fullArgsText, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
         const { react } = utils;
 
@@ -37,9 +37,7 @@ module.exports = {
             }
         }
         if (!candidate && mentionedRaw) {
-            if (String(mentionedRaw).endsWith('@lid')) {
-                return await sock.sendMessage(from, { text: '❌ Não consegui identificar o número (menção @lid sem telefone visível).\n\n💡 Use: !addguardiao 5598989138217 (digite o número com DDI+DDD).' }, { quoted: m });
-            }
+            // @lid nunca é salvo cru: resolve para o telefone real (ver identity).
             candidate = mentionedRaw;
         }
 
@@ -47,8 +45,12 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Use: !addguardiao 5598989138217\n\n💡 Você também pode marcar (@) ou responder a mensagem da pessoa.' }, { quoted: m });
         }
 
-        const phone = utils.normalizePhoneNumber(String(candidate).split('@')[0] || candidate);
+        const identity = require('../services/identity');
+        const { phone, reason } = await identity.resolveCandidateToPhone(sock, utils, candidate, from);
         if (!phone) {
+            if (reason === 'lid-sem-telefone') {
+                return await sock.sendMessage(from, { text: '❌ Não consegui identificar o número (menção @lid sem telefone visível).\n\n💡 Use: !addguardiao 5598989138217 (digite o número com DDI+DDD).' }, { quoted: m });
+            }
             return await sock.sendMessage(from, { text: '❌ Número inválido. Use: !addguardiao 5598989138217' }, { quoted: m });
         }
 
@@ -64,7 +66,7 @@ module.exports = {
             return await react(sock, m, '❌', currentBotResponse, GLOBAL_COOLDOWN);
         }
 
-        await sock.sendMessage(from, { text: `✅ *${res.phone}* agora é *guardião* do bot! 🛡️💛\n\nCom essa confiança ele vai poder:\n✅ Ligar e desligar o bot nos grupos (*!ativar* / *!desativar*)\n✅ Usar o modo parcial (*!ativarp* / *!desativarp*)\n✅ Cuidar das notícias (*!news ativar/desativar*)\n✅ Conversar com a IA do dono (*!aidono*)\n\nObrigado por ajudar a cuidar da comunidade! ✨\n💡 Veja a lista com *!listguardioes*` }, { quoted: m });
+        await sock.sendMessage(from, { text: `✅ *${res.phone}* agora é *guardião* do bot! 🛡️💛\n\nCom essa confiança ele vai poder:\n✅ Ligar e desligar o bot nos grupos (*!ativar* / *!desativar*)\n✅ Usar o modo parcial (*!ativarp* / *!desativarp*)\n✅ Cuidar das notícias (*!news ativar/desativar*)\n✅ Conversar com a IA do dono (*!aidono*)\n✅ Ligar e desligar o bate-papo automático (*!autoresponder on/off*)\n\nObrigado por ajudar a cuidar da comunidade! ✨\n💡 Veja a lista com *!listguardioes*` }, { quoted: m });
         return await react(sock, m, '✅', currentBotResponse, GLOBAL_COOLDOWN);
     }
 };

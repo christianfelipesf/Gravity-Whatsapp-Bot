@@ -25,12 +25,16 @@ module.exports = {
             return currentBotResponse;
         }
 
-        const lines = list.map((s, i) => {
+        const identity = require('../services/identity');
+        const lines = [];
+        for (let i = 0; i < list.length; i++) {
+            const s = list[i];
             const phone = s.phoneNumber ? `+${s.phoneNumber}` : '?';
             const status = s.connected ? '🟢 online' : '🟡 iniciando';
             const since = new Date(s.startedAt).toLocaleString('pt-BR');
-            return `${i + 1}. ${status} — \`${phone}\`\n   Prefixo: \`${s.prefix}\` • desde ${since}\n   JID: \`${s.ownerJid.split('@')[0]}\``;
-        });
+            const ownerLabel = await identity.personLabel(sock, utils, null, s.ownerJid).catch(() => 'membro');
+            lines.push(`${i + 1}. ${status} — \`${phone}\` (${ownerLabel})\n   Prefixo: \`${s.prefix}\` • desde ${since}`);
+        }
 
         await sock.sendMessage(from, {
             text: `📋 *Sub-sessões ativas (${list.length})*\n\n${lines.join('\n\n')}\n\n💡 Use *!logoff* para encerrar a sua.`

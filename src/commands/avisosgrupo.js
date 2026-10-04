@@ -50,13 +50,16 @@ async function sendPreview(sock, m, utils, from, sender, target) {
     const fakeChanges = '📝 Novo nome: *Exemplo*\n📄 Nova descrição: exemplo';
     const previewJid = resolveDisplayJid(sender, previewParts);
     const isActorMode = target === 'promover' || target === 'rebaixar';
-    const text = msg.split('@user').join(`@${String(previewJid).split('@')[0].split(':')[0]}`).split('{autor}').join(`@${String(previewJid).split('@')[0].split(':')[0]}`).split('{grupo}').join(subject).split('{mudancas}').join(fakeChanges);
+    // LID não resolvido: nunca exibe dígitos opacos (prévia é só demonstração).
+    const previewIsLid = String(previewJid).toLowerCase().endsWith('@lid');
+    const previewTag = previewIsLid ? '@você' : `@${String(previewJid).split('@')[0].split(':')[0]}`;
+    const text = msg.split('@user').join(previewTag).split('{autor}').join(previewTag).split('{grupo}').join(subject).split('{mudancas}').join(fakeChanges);
     try {
         const digits = String(previewJid).split('@')[0].split(':')[0];
         const pushName = m.pushName || null;
         const isGroup = target === 'grupo';
         const userName = isGroup ? subject.slice(0, 24)
-            : ((pushName && !/^(usuário|usuario)?$/i.test(String(pushName).trim())) ? String(pushName).trim().slice(0, 26) : (/^\d{8,15}$/.test(digits) ? formatPhoneDisplay(digits) : 'Você'));
+            : ((pushName && !/^(usuário|usuario)?$/i.test(String(pushName).trim())) ? String(pushName).trim().slice(0, 26) : (!previewIsLid && /^\d{8,15}$/.test(digits) ? formatPhoneDisplay(digits) : 'Você'));
         const [avatarRaw, groupAvatarRaw] = await Promise.all([
             isGroup ? Promise.resolve(null) : getUserAvatarBuffer(sock, sender, from, utils.groupMetadataCached, previewParts).catch(() => null),
             getGroupAvatarBuffer(sock, from).catch(() => null)

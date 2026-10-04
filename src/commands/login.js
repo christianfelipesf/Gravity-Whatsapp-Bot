@@ -39,7 +39,21 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Use o !login apenas no privado do bot.' }, { quoted: m });
         }
 
-        const phoneArg = normalizePhone(fullArgsText);
+        const rawArg = normalizePhone(fullArgsText);
+        // LID colado não serve para pareamento: tenta converter p/ telefone real.
+        // Se tem cara de LID (>=14 dígitos) e não resolve, avisa em vez de falhar mudo.
+        let phoneArg = rawArg;
+        if (rawArg) {
+            try {
+                const identity = require('../services/identity');
+                const r = await identity.resolveCandidateToPhone(sock, utils, rawArg, isGroup ? from : null);
+                if (r.phone && r.phone !== rawArg) phoneArg = r.phone;
+                else if (rawArg.length >= 14 && !r.resolvedFromLid) phoneArg = null;
+            } catch (_) {}
+        }
+        if (rawArg && !phoneArg) {
+            return await sock.sendMessage(from, { text: '❌ Isso parece um ID interno (@lid), não um número de telefone.\n\n💡 Digite o número com DDI+DDD: *!login 5511999999999*' }, { quoted: m });
+        }
         const usePairing = !!phoneArg;
 
         let currentBotResponse = await react(sock, m, '🔐', lastBotResponse, GLOBAL_COOLDOWN);

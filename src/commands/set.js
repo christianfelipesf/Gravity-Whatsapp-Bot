@@ -108,8 +108,8 @@ module.exports = {
             }
             
             if (p === 'prefix') config.prefix = v.trim()[0] || '!';
-            else if (p === 'showLogoInMenu' || p === 'voiceEffects' || p === 'dashboardEnabled' || p === 'newsEnabled' || p === 'newsRandomSub' || p === 'newsOnePerCycle' || p === 'subSessionsGroups' || p === 'splashEnabled' || p === 'splashWithImage' || p === 'humanMode' || p === 'humanPresence' || p === 'humanReadReceipt' || p === 'broadcastVaryText') config[p] = v.toLowerCase() === 'true';
-            else if (p === 'summaryLimit' || p === 'clearDefaultLimit' || p === 'dashboardPort' || p === 'dashboardMaxLogs' || p === 'dashboardHistoryHours' || p === 'newsSendDelayMs' || p === 'newsFetchStaggerMs' || p === 'newsMaxPerCycle' || p === 'newsMaxRetries' || p === 'newsRetryBaseDelayMs' || p === 'dashboardTrimIntervalMs' || p === 'maxMediaDurationSeconds' || p === 'maxDownloadSizeMB' || p === 'splashInterval' || p === 'splashCooldownMs' || p === 'humanMinDelayMs' || p === 'humanMaxDelayMs' || p === 'humanMsPerChar' || p === 'humanMaxTypingMs' || p === 'humanThrottleMs' || p === 'broadcastMinDelayMs' || p === 'broadcastMaxDelayMs') {
+            else if (p === 'showLogoInMenu' || p === 'voiceEffects' || p === 'dashboardEnabled' || p === 'newsEnabled' || p === 'newsRandomSub' || p === 'newsOnePerCycle' || p === 'subSessionsGroups' || p === 'splashEnabled' || p === 'splashWithImage' || p === 'humanMode' || p === 'humanPresence' || p === 'humanReadReceipt' || p === 'broadcastVaryText' || p === 'dashboardMuted' || p === 'historyMuted' || p === 'rejectCalls' || p === 'tagOwnerOnMod') { config[p] = v.toLowerCase() === 'true'; try { if (p === 'historyMuted') config.dashboardMuted = config[p]; else if (p === 'dashboardMuted') config.historyMuted = config[p]; } catch (_) {} }
+            else if (p === 'summaryLimit' || p === 'clearDefaultLimit' || p === 'dashboardPort' || p === 'dashboardMaxLogs' || p === 'historyMaxLogs' || p === 'dashboardHistoryHours' || p === 'historyHours' || p === 'newsSendDelayMs' || p === 'newsFetchStaggerMs' || p === 'newsMaxPerCycle' || p === 'newsMaxRetries' || p === 'newsRetryBaseDelayMs' || p === 'dashboardTrimIntervalMs' || p === 'historyTrimIntervalMs' || p === 'maxMediaDurationSeconds' || p === 'maxDownloadSizeMB' || p === 'splashInterval' || p === 'splashCooldownMs' || p === 'humanMinDelayMs' || p === 'humanMaxDelayMs' || p === 'humanMsPerChar' || p === 'humanMaxTypingMs' || p === 'humanThrottleMs' || p === 'broadcastMinDelayMs' || p === 'broadcastMaxDelayMs') {
                 const n = parseInt(v, 10);
                 if (!Number.isFinite(n)) { await sock.sendMessage(from, { text: `❌ Valor inválido para ${p}` }, { quoted: m }); return lastBotResponse; }
                 if (p === 'dashboardPort' && (n < 1024 || n > 65535)) { await sock.sendMessage(from, { text: `❌ Porta inválida (1024-65535)` }, { quoted: m }); return lastBotResponse; }
@@ -119,6 +119,16 @@ module.exports = {
                 if (p === 'splashInterval' && (n < 60 || n > 200)) { await sock.sendMessage(from, { text: `❌ Intervalo inválido (60-200)` }, { quoted: m }); return lastBotResponse; }
                 if (p === 'splashCooldownMs' && (n < 21600000 || n > 86400000)) { await sock.sendMessage(from, { text: `❌ Cooldown inválido (21600000-86400000ms = 6h-24h)` }, { quoted: m }); return lastBotResponse; }
                 config[p] = n;
+                // Histórico desvinculado do painel: `history*` espelha `dashboard*`
+                // (e vice-versa) para não divergirem via !set antigo/novo.
+                try {
+                    if (p === 'historyMaxLogs') config.dashboardMaxLogs = n;
+                    else if (p === 'dashboardMaxLogs') config.historyMaxLogs = n;
+                    else if (p === 'historyHours') config.dashboardHistoryHours = n;
+                    else if (p === 'dashboardHistoryHours') config.historyHours = n;
+                    else if (p === 'historyTrimIntervalMs') config.dashboardTrimIntervalMs = n;
+                    else if (p === 'dashboardTrimIntervalMs') config.historyTrimIntervalMs = n;
+                } catch (_) {}
             }
             else if (p === 'newsPollIntervalMinutes' || p === 'newsPollIntervalMs') {
                 // Aceita: "45" (minutos), "45m", "60s", "1h", "2700000ms".

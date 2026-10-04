@@ -476,6 +476,10 @@ async function maybeAutoReply(sock, m, { from, sender, senderName, text, config 
             const chunks = splitMessage(msg.text);
             const firstMsg = { text: chunks[0] };
             if (msg.mentions && chunks[0].includes('@')) firstMsg.mentions = msg.mentions;
+            try {
+                if (sock?.sendPresenceUpdate) await sock.sendPresenceUpdate('composing', from).catch(() => {});
+                await new Promise((r) => setTimeout(r, 600 + Math.random() * 1200));
+            } catch (_) {}
             await sock.sendMessage(from, firstMsg, sendOpts);
             for (let i = 1; i < chunks.length; i++) {
                 try {

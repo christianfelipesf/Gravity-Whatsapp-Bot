@@ -1,4 +1,5 @@
-const { isDashboardEnabled, getDashboardGroupInfo, upsertDashboardGroupInfo, groupMetadataCached, clearGroupMetadataCache, isBlacklisted, botIsAdmin, recordModEvent, getGroupData, getThemeForJid } = require('../database/utils');
+const { isDashboardEnabled, getDashboardGroupInfo, upsertDashboardGroupInfo, groupMetadataCached, clearGroupMetadataCache, isBlacklisted, isBlacklistedAny, botIsAdmin, recordModEvent, getGroupData, getThemeForJid } = require('../database/utils');
+const identity = require('../services/identity');
 const { getTheme } = require('../services/themes');
 const { generateWelcomeImage, getUserAvatarBuffer, getGroupAvatarBuffer, resolveDisplayJid, displayNameForEvent } = require('../services/welcomeImage');
 const store = require('../history/store');
@@ -71,11 +72,6 @@ function snapshotGroup(jid, meta) {
     } catch (_) {}
 }
 
-function displayNameFor(p) {
-    const digits = String(p || '').split('@')[0].split(':')[0];
-    return /^\d{8,15}$/.test(digits) ? `@${digits}` : 'Membro';
-}
-
 async function resolveTheme(groupJid) {
     try {
         const themeId = (typeof getThemeForJid === 'function' ? getThemeForJid(groupJid) : 'default');
@@ -87,12 +83,19 @@ async function sendEventCard(sock, { groupJid, mode, userJid, authorJid, default
     const parts = Array.isArray(participants) ? participants : [];
     // Eventos do grupo trazem @lid (número opaco): resolve para o telefone
     // para nome, legenda e busca da foto. Sem pushName aqui, é o melhor sinal.
+    // LID não resolvido nunca aparece cru no texto (usa nome/'Novo membro').
     const displayJid = resolveDisplayJid(userJid, parts);
-    const mentionTag = `@${String(displayJid).split('@')[0].split(':')[0]}`;
+    const displayIsLid = String(displayJid).toLowerCase().endsWith('@lid');
+    const mentionTag = displayIsLid
+        ? displayNameForEvent(userJid, parts)
+        : `@${String(displayJid).split('@')[0].split(':')[0]}`;
     // Promoção/rebaixamento: quem FEZ a ação (anu.author) aparece no card e na legenda.
     const isActorMode = (mode === 'promote' || mode === 'demote') && !!authorJid;
     const actorDisplayJid = isActorMode ? resolveDisplayJid(authorJid, parts) : null;
-    const actorTag = actorDisplayJid ? `@${String(actorDisplayJid).split('@')[0].split(':')[0]}` : '';
+    const actorIsLid = actorDisplayJid ? String(actorDisplayJid).toLowerCase().endsWith('@lid') : false;
+    const actorTag = actorDisplayJid
+        ? (actorIsLid ? displayNameForEvent(authorJid, parts) : `@${String(actorDisplayJid).split('@')[0].split(':')[0]}`)
+        : '';
     const actorName = isActorMode ? displayNameForEvent(authorJid, parts) : null;
     const msg = (customMsg || '').toString().trim() || defaultMsg;
     const text = msg.split('@user').join(mentionTag).split('{autor}').join(actorTag).split('{grupo}').join(subject);
@@ -131,6 +134,7 @@ async function sendWelcomeBatch(sock, { groupJid, userJids, defaultMsg, customMs
     const parts = Array.isArray(participants) ? participants : [];
     const tags = userJids.map((u) => {
         const d = resolveDisplayJid(u, parts);
+        if (String(d).toLowerCase().endsWith('@lid')) return displayNameForEvent(u, parts);
         return `@${String(d).split('@')[0].split(':')[0]}`;
     });
     const allTags = tags.join(' ');
@@ -182,9 +186,32 @@ module.exports = {
         // === Lista negra: auto-ban ao tentar voltar ao grupo ===
         if (anu.action === 'add' && Array.isArray(anu.participants) && anu.participants.length > 0) {
             try {
+                // Metadados do próprio grupo: resolve @lid<->telefone sem varredura.
+                let joinParts = [];
+                try {
+                    const jm = await groupMetadataCached(sock, anu.id).catch(() => null);
+                    if (Array.isArray(jm?.participants)) joinParts = jm.participants;
+                } catch (_) {}
+                const aliasesOf = (p) => {
+                    const out = [p];
+                    try {
+                        const want = identity.digitsOf(p);
+                        for (const part of joinParts) {
+                            const cands = [part.id, part.jid, part.lid, part.phoneNumber, part.pn].filter(Boolean).map(String);
+                            if (!cands.map(identity.digitsOf).includes(want)) continue;
+                            for (const c of cands) out.push(c);
+                        }
+                    } catch (_) {}
+                    return [...new Set(out)];
+                };
                 const blacklistedToBan = [];
                 for (const p of anu.participants) {
-                    try { if (isBlacklisted(anu.id, p)) blacklistedToBan.push(p); } catch (_) {}
+                    try {
+                        const hit = typeof isBlacklistedAny === 'function'
+                            ? isBlacklistedAny(anu.id, aliasesOf(p))
+                            : isBlacklisted(anu.id, p);
+                        if (hit) blacklistedToBan.push(p);
+                    } catch (_) {}
                 }
                 if (blacklistedToBan.length > 0) {
                     const isBotAdmin = await botIsAdmin(sock, anu.id);
@@ -194,17 +221,31 @@ module.exports = {
                         for (const target of blacklistedToBan) {
                             try {
                                 await sock.groupParticipantsUpdate(anu.id, [target], 'remove');
-                                const phone = target.split('@')[0];
-                                console.log(`🚫 [listanegra] auto-ban: ${phone} removido de ${anu.id}`);
+                                // Rótulo seguro: nome > telefone formatado; nunca LID cru.
+                                let who = 'membro';
+                                try {
+                                    const want = identity.digitsOf(target);
+                                    for (const part of joinParts) {
+                                        const cands = [part.id, part.jid, part.lid, part.phoneNumber, part.pn].filter(Boolean).map(String);
+                                        if (!cands.map(identity.digitsOf).includes(want)) continue;
+                                        const nm = part.notify || part.name || part.verifiedName;
+                                        if (nm && !/^(usuário|usuario)$/i.test(String(nm).trim())) { who = String(nm).trim().slice(0, 30); break; }
+                                        const ph = cands.filter((c) => !identity.isLidJid(c)).map(identity.digitsOf).find((d) => d && d.length >= 8 && d.length <= 15);
+                                        if (ph) { who = identity.formatPhoneDisplay(ph); break; }
+                                        break;
+                                    }
+                                    if (who === 'membro' && !identity.isLidJid(target)) who = identity.formatPhoneDisplay(want) || 'membro';
+                                } catch (_) {}
+                                console.log(`🚫 [listanegra] auto-ban: ${who} removido de ${anu.id}`);
                                 // Avisa no grupo
                                 try {
-                                    await sock.sendMessage(anu.id, { text: `🚫 @${phone} está na lista negra e foi removido automaticamente.`, mentions: [target] });
+                                    await sock.sendMessage(anu.id, { text: `🚫 ${who} está na lista negra e foi removido automaticamente.`, mentions: [target] });
                                 } catch (_) {}
                                 // Loga no dashboard (se houver metadata para nome)
                                 try {
                                     const meta = await groupMetadataCached(sock, anu.id).catch(() => null);
                                     const subject = meta?.subject || 'Grupo';
-                                    safeDashboardLog('event', subject, `🚫 Lista negra: @${phone} auto-banido`, null, phone, null, {
+                                    safeDashboardLog('event', subject, `🚫 Lista negra: ${who} auto-banido`, null, identity.isLidJid(target) ? null : identity.digitsOf(target), null, {
                                         toJid: anu.id,
                                         senderJid: target,
                                         fromMe: false
@@ -277,7 +318,22 @@ module.exports = {
                         if (isJoin) {
                             // Lote único: N entradas no mesmo evento (ou rajada) viram 1 mensagem
                             // com todas as menções, em vez de N mensagens. Conta como 1 envio p/ o cooldown.
-                            const targets = anu.participants.filter((p) => { try { return !isBlacklisted(anu.id, p); } catch (_) { return true; } });
+                            // Filtra quem está na lista negra (casa telefone<->LID via aliases).
+                            const targets = anu.participants.filter((p) => {
+                                try {
+                                    if (typeof isBlacklistedAny !== 'function') return !isBlacklisted(anu.id, p);
+                                    const want = identity.digitsOf(p);
+                                    const aliases = [p];
+                                    for (const part of eventParticipants) {
+                                        const cands = [part.id, part.jid, part.lid, part.phoneNumber, part.pn].filter(Boolean).map(String);
+                                        if (cands.map(identity.digitsOf).includes(want)) {
+                                            for (const c of cands) aliases.push(c);
+                                            break;
+                                        }
+                                    }
+                                    return !isBlacklistedAny(anu.id, [...new Set(aliases)]);
+                                } catch (_) { return true; }
+                            });
                             if (targets.length === 1) {
                                 try {
                                     await sendEventCard(sock, {

@@ -31,7 +31,16 @@ module.exports = {
 
         let currentBotResponse = await react(sock, m, '🧹', lastBotResponse, GLOBAL_COOLDOWN);
 
-        const res = utils.removeSubOwner(String(candidate).split('@')[0] || candidate);
+        let res = utils.removeSubOwner(String(candidate).split('@')[0] || candidate);
+        // Compat LID: cruza telefone<->LID via metadados (ver identity).
+        if (!res.ok && res.error === 'não encontrado') {
+            try {
+                const identity = require('../services/identity');
+                const stored = utils.getSubOwners ? utils.getSubOwners() : [];
+                const match = await identity.findStoredMatch(sock, utils, stored, String(candidate).split('@')[0] || candidate, from);
+                if (match) res = utils.removeSubOwner(match);
+            } catch (_) {}
+        }
         if (!res.ok) {
             await sock.sendMessage(from, { text: `❌ Falha ao remover: ${res.error}` }, { quoted: m });
             return await react(sock, m, '❌', currentBotResponse, GLOBAL_COOLDOWN);

@@ -49,6 +49,17 @@ function createMuteHelpers({ getGroupState, upsertGroupState }) {
         return true;
     }
 
+    // Variante alias-aware: casa qualquer chave (telefone e/ou LID).
+    // Use com identity.messageAliasKeys / identity.targetKeys.
+    function isMutedAny(jid, participants) {
+        if (!jid) return false;
+        const keys = Array.isArray(participants) ? participants : [participants];
+        for (const k of keys) {
+            try { if (k && isMuted(jid, k)) return true; } catch (_) {}
+        }
+        return false;
+    }
+
     function addMuted(jid, participant) {
         if (!jid || !participant) return false;
         const obj = readMutedObj(jid);
@@ -78,7 +89,7 @@ function createMuteHelpers({ getGroupState, upsertGroupState }) {
         writeMutedObj(jid, {});
     }
 
-    return { cleanupMuted, cleanupAllMuted, isMuted, addMuted, removeMuted, listMuted, clearMuted, MUTE_TTL_MS };
+    return { cleanupMuted, cleanupAllMuted, isMuted, isMutedAny, addMuted, removeMuted, listMuted, clearMuted, MUTE_TTL_MS };
 }
 
 module.exports = { createMuteHelpers };
