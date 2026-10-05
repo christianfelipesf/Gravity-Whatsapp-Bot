@@ -1,19 +1,8 @@
 const sharp = require('sharp');
+const base = require('./imageBase');
 
-function escapeXml(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-function truncate(s, n) {
-    s = String(s || '');
-    if (s.length <= n) return s;
-    return s.slice(0, n - 1) + '…';
-}
+const escapeXml = base.escapeXml;
+const truncate = base.truncate;
 
 const COLORS = {
     bg: '#0f0f14',
@@ -38,16 +27,23 @@ function secTitle(y, title, C) {
 }
 
 function statBox(x, y, w, h, value, label, C, valueColor) {
+    // Anti-overlap: valor longo (ex "+12/-34") reduz a fonte para caber na caixa.
+    const v = String(value == null ? '' : value);
+    const vSize = v.length > 12 ? 26 : v.length > 9 ? 32 : 40;
+    const vFit = base.fitText(v, Math.max(60, w - 24), vSize, { weight: 900, maxChars: 20 });
+    const lFit = base.fitText(label, Math.max(60, w - 24), 18, { weight: 600, maxChars: 26 });
     return `<g>
         <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="${C.row}" stroke="#2a2a3a" stroke-width="1"/>
-        <text x="${x + w / 2}" y="${y + 52}" text-anchor="middle" font-family="sans-serif" font-size="40" font-weight="900" fill="${valueColor || C.text}">${escapeXml(value)}</text>
-        <text x="${x + w / 2}" y="${y + 82}" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="600" fill="${C.sub}">${escapeXml(label)}</text>
+        <text x="${x + w / 2}" y="${y + 52}" text-anchor="middle" font-family="sans-serif" font-size="${vFit.fontSize}" font-weight="900" fill="${valueColor || C.text}">${vFit.text}</text>
+        <text x="${x + w / 2}" y="${y + 82}" text-anchor="middle" font-family="sans-serif" font-size="${lFit.fontSize}" font-weight="600" fill="${C.sub}">${lFit.text}</text>
     </g>`;
 }
 
 function infoLine(y, label, value, C) {
+    // Valor ajustado à largura restante da linha (não invade a borda direita).
+    const vFit = base.fitText(value, Math.max(120, W - (PAD + 230) - PAD), 24, { weight: 800, maxChars: 40 });
     return `<text x="${PAD}" y="${y}" font-family="sans-serif" font-size="24" font-weight="600" fill="${C.sub}">${escapeXml(label)}</text>
-    <text x="${PAD + 230}" y="${y}" font-family="sans-serif" font-size="24" font-weight="800" fill="${C.text}">${escapeXml(value)}</text>`;
+    <text x="${PAD + 230}" y="${y}" font-family="sans-serif" font-size="${vFit.fontSize}" font-weight="800" fill="${C.text}">${vFit.text}</text>`;
 }
 
 /**
@@ -63,23 +59,26 @@ async function generateGroupInfoImage(opts = {}) {
         antilinkOn = false, antifloodOn = false, onlyAdmins = false, theme
     } = opts;
 
-    const C = (theme && theme.colors) ? { ...COLORS, ...theme.colors } : COLORS;
+    const C = base.getColors(theme, COLORS);
     const accent = C.accent || COLORS.accent;
 
     let y = 0;
     let svg = '';
 
-    // ===== Header =====
+    // ===== Header (título + nome do grupo limitados à área antes do badge) =====
     const HEADER_H = 200;
+    const headerMaxW = Math.max(200, (W - 250 - 24) - 60);
+    const tGiTitle = base.fitText('ANÁLISE DO GRUPO', headerMaxW, 38, { weight: 900, maxChars: 28 });
+    const tGiGroup = base.fitText(groupName || 'Grupo', headerMaxW, 22, { weight: 600, maxChars: 48 });
     svg += `
         <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="${C.headerBg}"/>
         <rect x="0" y="0" width="${W}" height="6" fill="${accent}"/>
         <rect x="${PAD}" y="38" width="8" height="60" rx="4" fill="${accent}"/>
-        <text x="60" y="66" font-family="sans-serif" font-size="38" font-weight="900" fill="${C.text}">ANÁLISE DO GRUPO</text>
-        <text x="60" y="102" font-family="sans-serif" font-size="22" font-weight="600" fill="${C.sub}">${escapeXml(truncate(groupName || 'Grupo', 44))}</text>
-        <text x="60" y="132" font-family="sans-serif" font-size="16" fill="${C.sub}">${escapeXml(botName || 'Bot')}</text>
+        <text x="60" y="66" font-family="sans-serif" font-size="${tGiTitle.fontSize}" font-weight="900" fill="${C.text}">${tGiTitle.text}</text>
+        <text x="60" y="102" font-family="sans-serif" font-size="${tGiGroup.fontSize}" font-weight="600" fill="${C.sub}">${tGiGroup.text}</text>
+        <text x="60" y="132" font-family="sans-serif" font-size="16" fill="${C.sub}">${escapeXml(truncate(botName || 'Bot', 48))}</text>
         <rect x="${W - 250}" y="30" width="218" height="42" rx="21" fill="${accent}"/>
-        <text x="${W - 141}" y="58" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="#fff">${escapeXml(String(engLabel || '7 DIAS').toUpperCase().slice(0, 22))}</text>
+        <text x="${W - 141}" y="58" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="${C.badgeText || '#fff'}">${escapeXml(truncate(String(engLabel || '7 DIAS').toUpperCase(), 22))}</text>
         <rect x="${PAD}" y="${HEADER_H - 12}" width="${W - PAD * 2}" height="1" fill="#2a2a3a"/>`;
     y = HEADER_H + 40;
 
@@ -182,8 +181,8 @@ async function generateGroupInfoImage(opts = {}) {
         ${svg}
     </svg>`;
 
-    let buf = await sharp(Buffer.from(full), { density: 144 }).png().toBuffer();
-    buf = await sharp(buf).resize({ width: 1080 }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    let buf = await base.svgToPng(full, 144);
+    buf = await base.finalizeJpeg(buf);
     return buf;
 }
 

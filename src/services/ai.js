@@ -59,9 +59,11 @@ function _buildBackoffs(baseMs) {
     return [base, Math.round(base * 2), Math.round(base * 4), Math.round(base * 8)];
 }
 
-// Timeout por tentativa (ms). Orçamento total do comando é CMD_TIMEOUT_MS (45s):
-// 20s + 2s backoff + 20s = 42s < 45s com retryCount padrão 1.
-const ATTEMPT_TIMEOUT_MS = 20000;
+// Timeout por tentativa (ms). OpenRouter medido: ~30s p/ responder vazio
+// com reasoning (05/10/2026), então 20s matava tentativa saudável.
+// 35s + backoff 2s + 35s + backoff 4s + 35s = ~111s: cabe no CMD_TIMEOUT
+// de IA (120s) com retryCount padrão 2.
+const ATTEMPT_TIMEOUT_MS = 35000;
 
 function _sleepAbortable(ms, signal) {
     return new Promise((resolve, reject) => {
@@ -86,7 +88,7 @@ function _isRetryableError(err) {
     const msg = String(err.message || err || '').toLowerCase();
     // Resposta vazia (ex.: reasoning consumiu todo o max_tokens, finish_reason=length)
     // é transitória na maioria das vezes -> permite 1 retry em vez de entregar vazio.
-    if (msg.includes('resposta vazia') || msg.includes('empty response') || msg.includes('finish_reason=length')) return true;
+    if (msg.includes('resposta vazia') || msg.includes('resposta cortada') || msg.includes('empty response') || msg.includes('finish_reason=length')) return true;
     return msg.includes('rate limit') || msg.includes('rate_limit') || msg.includes('timeout') || msg.includes('429') || msg.includes('503') || /\b5\d\d\b/.test(msg);
 }
 
@@ -147,14 +149,18 @@ async function callWithRetry(apiKey, modelName, systemInstruction, prompt, maxTo
     const retries = Math.max(0, Math.min(3, Number(retryCount) || 1));
     const backoffs = _buildBackoffs(2000);
     // Reasoning consome o mesmo budget de max_tokens. Com 500 tokens o modelo
-    // gasta tudo pensando e devolve content="". Garante piso p/ reasoning.
-    const effectiveMaxTokens = _isReasoningModel(modelName)
-        ? Math.max(Number(maxTokens) || 500, 1500)
+    // gasta tudo pensando e devolve content="" ou corta no meio
+    // (finish_reason=length — caso do !ai 05/10/2026). Piso 2500 p/ reasoning
+    // + escalonamento por tentativa: cada retry ganha +1000 tokens.
+    const baseMaxTokens = _isReasoningModel(modelName)
+        ? Math.max(Number(maxTokens) || 500, 2500)
         : (Number(maxTokens) || 500);
     const useTools = Array.isArray(extra.tools) && extra.tools.length > 0;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
         if (signal?.aborted) throw Object.assign(new Error('Comando interrompido por timeout'), { code: 'ABORTED' });
+        // Escalona o teto a cada retry: 2500 -> 3500 -> 4500 (reasoning).
+        const effectiveMaxTokens = useTools ? baseMaxTokens : baseMaxTokens + attempt * 1000;
         try {
             const { data } = await axios.post(`${OPENROUTER_BASE}/chat/completions`, {
                 model: modelName,
@@ -200,6 +206,19 @@ async function callWithRetry(apiKey, modelName, systemInstruction, prompt, maxTo
                 const preview = useTools ? `[modo agente, ${extra.messages.length} msgs]` : String(prompt).slice(0, 80);
                 console.warn(`⚠️ [IA] Tentativa ${attempt + 1}/${retries + 1}: ${emptyErr.message} | modelo=${modelName} | prompt=${preview}...`);
                 throw emptyErr;
+            }
+
+            // Cortada no meio (finish_reason=length com texto parcial):
+            // tenta de novo com teto maior em vez de entregar cortada.
+            // Na última tentativa entrega o parcial (melhor que nada).
+            const isTruncated = finish === 'length' || nativeFinish === 'length';
+            if (isTruncated && !useTools && attempt < retries) {
+                const truncErr = new Error(`Resposta cortada da IA (finish_reason=length, ${text.length} chars, max_tokens=${effectiveMaxTokens})`);
+                console.warn(`⚠️ [IA] Tentativa ${attempt + 1}/${retries + 1}: ${truncErr.message} | modelo=${modelName} | retry com teto maior...`);
+                throw truncErr;
+            }
+            if (isTruncated && !useTools) {
+                console.warn(`⚠️ [IA] Resposta final possivelmente cortada (finish_reason=length, ${text.length} chars) | modelo=${modelName}`);
             }
 
             usageStats.totalRequests++;

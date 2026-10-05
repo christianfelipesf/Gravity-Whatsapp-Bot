@@ -6,21 +6,10 @@
  */
 
 const sharp = require('sharp');
+const base = require('./imageBase');
 
-function escapeXml(s) {
-    return String(s == null ? '' : s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-function truncate(s, n) {
-    s = String(s == null ? '' : s);
-    if (s.length <= n) return s;
-    return s.slice(0, n - 1) + '…';
-}
+const escapeXml = base.escapeXml;
+const truncate = base.truncate;
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -43,32 +32,15 @@ const AVATAR_SIZE = 56;
 
 /** Buffer circular a partir de imagem quadrada. */
 async function toCircularAvatar(buf, size) {
-    const sz = size || AVATAR_SIZE;
-    try {
-        const resized = await sharp(buf, { failOn: 'none' }).resize(sz, sz, { fit: 'cover' }).png().toBuffer();
-        const mask = `<svg width="${sz}" height="${sz}" xmlns="http://www.w3.org/2000/svg"><circle cx="${sz / 2}" cy="${sz / 2}" r="${sz / 2}" fill="white"/></svg>`;
-        return await sharp(resized).composite([{ input: Buffer.from(mask), blend: 'dest-in' }]).png().toBuffer();
-    } catch (_) {
-        return null;
-    }
+    return base.toCircularAvatar(buf, size || AVATAR_SIZE);
 }
 
-/** Placeholder com iniciais + cor determinística (número de urna). */
+/** Placeholder com número de urna (mantém 2 dígitos, cor do tema via base). */
 async function placeholderAvatar(label, size) {
     const sz = size || AVATAR_SIZE;
-    const letter = String(label || '?').trim().replace(/^\D+/, '').slice(0, 2) || '?';
-    let hash = 0;
-    const src = String(label || '?');
-    for (let i = 0; i < src.length; i++) hash = (hash * 31 + src.charCodeAt(i)) >>> 0;
-    const hues = [150, 45, 210, 200, 340, 260, 20];
-    const hue = hues[hash % hues.length];
-    const bg = `hsl(${hue}, 65%, 42%)`;
-    const svg = `<svg width="${sz}" height="${sz}" xmlns="http://www.w3.org/2000/svg"><circle cx="${sz / 2}" cy="${sz / 2}" r="${sz / 2}" fill="${bg}"/><text x="${sz / 2}" y="${sz / 2 + 7}" text-anchor="middle" font-family="sans-serif" font-size="${Math.round(sz * 0.38)}" font-weight="800" fill="white">${escapeXml(letter)}</text></svg>`;
-    try {
-        return await sharp(Buffer.from(svg)).png().toBuffer();
-    } catch (_) {
-        return null;
-    }
+    const digits = String(label || '?').trim().replace(/^\D+/, '').slice(0, 2) || '?';
+    // Reusa cor determinística da base passando os dígitos como "nome".
+    return base.placeholderAvatar(digits, sz);
 }
 
 /**
@@ -88,7 +60,9 @@ async function generateApuracaoImage(opts) {
     const o = opts || {};
     const cands = Array.isArray(o.candidatos) ? o.candidatos.slice(0, 14) : [];
     const turno = o.turno === 2 ? 2 : 1;
-    const C = { ...COLORS };
+    // Antes ignorava o tema do grupo (cores fixas verde/amarelo).
+    // Agora aplica o tema, preservando a identidade da apuração como fallback.
+    const C = base.getColors(o.theme, COLORS);
     const W = 1080;
     const HEADER_H = 250;
     const ROW_H = 80;
@@ -107,24 +81,25 @@ async function generateApuracaoImage(opts) {
             const bg = i % 2 === 0 ? C.row : C.rowAlt;
             const border = i === 0 ? C.gold : i === 1 ? C.silver : i === 2 ? C.bronze : 'transparent';
             const medal = i < 3 ? MEDALS[i] : `#${i + 1}`;
-            const name = escapeXml(truncate(c.nomeUrna || c.nome || 'Candidato', 22));
-            const sub = escapeXml(truncate(`${c.numero || ''}${c.partido ? ' • ' + c.partido : ''}${c.vice ? ' • Vice: ' + c.vice : ''}`, 40));
+            // Anti-overlap: nome/sub limitados à área antes da coluna de % (pctX).
+            const pctX = W - 170;
+            const nameX = 162;
+            const nameFit = base.fitText(c.nomeUrna || c.nome || 'Candidato', Math.max(120, pctX - 130 - nameX), 26, { weight: 700, maxChars: 24 });
+            const subFit = base.fitText(`${c.numero || ''}${c.partido ? ' • ' + c.partido : ''}${c.vice ? ' • Vice: ' + c.vice : ''}`, Math.max(120, pctX - 130 - nameX), 15, { weight: 400, maxChars: 44 });
             const pctLabel = escapeXml(c.pct || '0,00%');
-            const votosLabel = escapeXml(c.votosFmt || String(c.votos || 0));
+            const votosLabel = escapeXml(truncate(c.votosFmt || String(c.votos || 0), 18));
             const barW = Math.max(40, Math.round(((Number(c.votos) || 0) / maxVotos) * 220));
             const medalX = 36;
             const avatarX = 84;
-            const nameX = 162;
-            const pctX = W - 170;
             const avatarBorder = isTop3 ? border : '#2a3550';
             return `
             <g>
                 <rect x="${PAD}" y="${y}" width="${W - PAD * 2}" height="${ROW_H - 8}" rx="14" fill="${bg}" stroke="${border}" stroke-width="${isTop3 ? 2 : 0}"/>
                 <text x="${medalX}" y="${y + 48}" font-family="sans-serif" font-size="${i < 3 ? 34 : 24}" font-weight="700" fill="${isTop3 ? border : C.sub}">${escapeXml(medal)}</text>
                 <circle cx="${avatarX + AVATAR_SIZE / 2}" cy="${y + (ROW_H - 8) / 2}" r="${AVATAR_SIZE / 2 + 2}" fill="none" stroke="${avatarBorder}" stroke-width="2"/>
-                <text x="${nameX}" y="${y + 33}" font-family="sans-serif" font-size="26" font-weight="700" fill="${C.text}">${name}</text>
-                <text x="${nameX}" y="${y + 57}" font-family="sans-serif" font-size="15" fill="${C.sub}">${sub}</text>
-                <text x="${pctX}" y="${y + 34}" text-anchor="middle" font-family="sans-serif" font-size="24" font-weight="900" fill="${i === 0 ? C.accent2 : C.text}">${pctLabel}%</text>
+                <text x="${nameX}" y="${y + 33}" font-family="sans-serif" font-size="${nameFit.fontSize}" font-weight="700" fill="${C.text}">${nameFit.text}</text>
+                <text x="${nameX}" y="${y + 57}" font-family="sans-serif" font-size="${subFit.fontSize}" fill="${C.sub}">${subFit.text}</text>
+                <text x="${pctX}" y="${y + 34}" text-anchor="middle" font-family="sans-serif" font-size="24" font-weight="900" fill="${i === 0 ? (C.accent2 || C.gold) : C.text}">${pctLabel}%</text>
                 <text x="${pctX}" y="${y + 54}" text-anchor="middle" font-family="sans-serif" font-size="14" fill="${C.sub}">${votosLabel} votos</text>
                 <rect x="${pctX - 110}" y="${y + 60}" width="220" height="6" rx="3" fill="#232e4d"/>
                 <rect x="${pctX - 110}" y="${y + 60}" width="${barW}" height="6" rx="3" fill="${isTop3 ? border : C.accent}" opacity="0.95"/>
@@ -133,22 +108,24 @@ async function generateApuracaoImage(opts) {
 
     const turnoLabel = turno === 2 ? '2º TURNO' : '1º TURNO';
     const statusLabel = o.finalizada ? 'TOTALIZADO' : 'APURANDO';
-    const abr = escapeXml(truncate(o.abrangenciaNome || 'BRASIL', 26));
-    const urnasLabel = escapeXml(`URNAS APURADAS ${o.secoesPct || '0,00'}%`);
-    const atualLabel = escapeXml(o.atualizacao ? `atualizado às ${o.atualizacao}` : 'fonte: TSE');
+    // Header com 2 badges à direita: título/sub limitados para não invadir.
+    const headerMaxW = Math.max(200, (W - 268 - 24) - 116);
+    const tApTitle = base.fitText('APURAÇÃO — PRESIDENTE 2026', headerMaxW, 38, { weight: 900, maxChars: 30 });
+    const tApSub = base.fitText(`${truncate(o.abrangenciaNome || 'BRASIL', 26)} • ${statusLabel} • ${o.atualizacao ? `atualizado às ${o.atualizacao}` : 'fonte: TSE'}`, headerMaxW, 21, { weight: 600, maxChars: 52 });
+    const urnasLabel = escapeXml(truncate(`URNAS APURADAS ${o.secoesPct || '0,00'}%`, 26));
     const barFillW = Math.max(8, Math.round(((W - PAD * 2) * pctNum) / 100));
 
     const headerSvg = `
         <rect x="0" y="0" width="${W}" height="${HEADER_H}" rx="0" fill="${C.headerBg}"/>
         <rect x="0" y="0" width="${W}" height="8" fill="${C.accent}"/>
-        <rect x="0" y="8" width="${W}" height="4" fill="${C.accent2}" opacity="0.9"/>
+        <rect x="0" y="8" width="${W}" height="4" fill="${C.accent2 || C.gold}" opacity="0.9"/>
         <text x="${PAD}" y="80" font-family="sans-serif" font-size="60">🇧🇷</text>
-        <text x="116" y="66" font-family="sans-serif" font-size="38" font-weight="900" fill="${C.text}">APURAÇÃO — PRESIDENTE 2026</text>
-        <text x="116" y="100" font-family="sans-serif" font-size="21" font-weight="600" fill="${C.sub}">${abr} • ${escapeXml(statusLabel)} • ${atualLabel}</text>
+        <text x="116" y="66" font-family="sans-serif" font-size="${tApTitle.fontSize}" font-weight="900" fill="${C.text}">${tApTitle.text}</text>
+        <text x="116" y="100" font-family="sans-serif" font-size="${tApSub.fontSize}" font-weight="600" fill="${C.sub}">${tApSub.text}</text>
         <rect x="${W - 268}" y="34" width="236" height="44" rx="22" fill="${C.accent}"/>
-        <text x="${W - 150}" y="63" text-anchor="middle" font-family="sans-serif" font-size="19" font-weight="900" fill="#fff">${escapeXml(turnoLabel)}</text>
-        <rect x="${W - 268}" y="86" width="236" height="36" rx="18" fill="none" stroke="${C.accent2}" stroke-width="2"/>
-        <text x="${W - 150}" y="110" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="800" fill="${C.accent2}">${urnasLabel}</text>
+        <text x="${W - 150}" y="63" text-anchor="middle" font-family="sans-serif" font-size="19" font-weight="900" fill="${C.badgeText || '#fff'}">${escapeXml(turnoLabel)}</text>
+        <rect x="${W - 268}" y="86" width="236" height="36" rx="18" fill="none" stroke="${C.accent2 || C.gold}" stroke-width="2"/>
+        <text x="${W - 150}" y="110" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="800" fill="${C.accent2 || C.gold}">${urnasLabel}</text>
         <text x="${PAD}" y="150" font-family="sans-serif" font-size="17" font-weight="700" fill="${C.sub}">${escapeXml(`${o.secoesApuradasFmt || ''}${o.secoesTotalFmt ? ' de ' + o.secoesTotalFmt + ' seções' : ''}`)}</text>
         <rect x="${PAD}" y="166" width="${W - PAD * 2}" height="16" rx="8" fill="#0a1224"/>
         <rect x="${PAD}" y="166" width="${barFillW}" height="16" rx="8" fill="${C.accent}"/>
@@ -208,7 +185,7 @@ async function generateApuracaoImage(opts) {
         console.warn('⚠️ [apuracaoImage] falha composite geral:', e.message);
     }
 
-    buf = await sharp(buf).resize({ width: 1080 }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    buf = await base.finalizeJpeg(buf);
     return buf;
 }
 

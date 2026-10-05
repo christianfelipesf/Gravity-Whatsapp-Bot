@@ -55,9 +55,11 @@ module.exports = {
                 }
             }
             const result = await model.generateContent(finalPrompt, { signal: abortSignal });
+            if (abortSignal?.aborted) return currentBotResponse;
             const responseText = result.response.text();
             
             if (!responseText) throw new Error('Resposta vazia da IA');
+            if (abortSignal?.aborted) return currentBotResponse;
             const styledText = `📝 *Resumo do chat* ✨\n\n${responseText.trim()}\n\n> _resumo automático 🤖_`;
             await sock.sendMessage(from, { text: styledText }, { quoted: m }); 
             return await react(sock, m, '✅', currentBotResponse, GLOBAL_COOLDOWN);

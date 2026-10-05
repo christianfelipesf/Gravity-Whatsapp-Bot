@@ -294,6 +294,12 @@ module.exports = {
                     const { generateMusicCover, fetchThumbRaw } = require('../services/musicCover');
                     const { getChannelConfig: _getChannelCfg } = require('../services/channelPromo');
                     const thumbRaw = await fetchThumbRaw(video).catch(() => null);
+                    let _theme = null;
+                    try {
+                        const { getTheme } = require('../services/themes');
+                        const _tid = typeof utils.getThemeForJid === 'function' ? utils.getThemeForJid(from) : 'default';
+                        _theme = getTheme(_tid);
+                    } catch (_) { _theme = null; }
                     const cover = await generateMusicCover({
                         title: safeTitle,
                         duration: formatDuration(duration),
@@ -301,6 +307,7 @@ module.exports = {
                         channelName: _getChannelCfg(config).name,
                         botName: config?.botName || 'Bot',
                         thumbRaw,
+                        theme: _theme,
                     });
                     if (cover && cover.length > 1024) {
                         const coverCaption = `🎵 *${String(safeTitle).slice(0, 80)}*\n⏱️ ${formatDuration(duration)} • ▶️ YouTube`;

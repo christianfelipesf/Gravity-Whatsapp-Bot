@@ -4,43 +4,16 @@ const crypto = require('crypto');
 const axios = require('axios');
 const sharp = require('sharp');
 const { resolveMenuImage } = require('./themes');
+const base = require('./imageBase');
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const OUT_W = 1080;
 const OUT_H = Math.round(OUT_W * 9 / 21);
 
-function escapeXml(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-function truncate(s, n) {
-    s = String(s || '');
-    if (s.length <= n) return s;
-    return s.slice(0, n - 1) + '…';
-}
-
-async function toCircularAvatar(buf, size) {
-    try {
-        const resized = await sharp(buf, { failOn: 'none' }).resize(size, size, { fit: 'cover' }).png().toBuffer();
-        const circleSvg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/></svg>`;
-        return await sharp(resized).composite([{ input: Buffer.from(circleSvg), blend: 'dest-in' }]).png().toBuffer();
-    } catch (_) { return null; }
-}
-
-async function placeholderAvatar(name, size) {
-    const letter = String(name || '?').trim()[0]?.toUpperCase() || '?';
-    let hash = 0;
-    for (let i = 0; i < String(name).length; i++) hash = (hash * 31 + String(name).charCodeAt(i)) >>> 0;
-    const hues = [260, 200, 160, 340, 30, 45, 280];
-    const hue = hues[hash % hues.length];
-    const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="hsl(${hue}, 68%, 48%)"/><text x="${size / 2}" y="${size / 2 + Math.round(size * 0.13)}" text-anchor="middle" font-family="sans-serif" font-size="${Math.round(size * 0.5)}" font-weight="800" fill="white">${escapeXml(letter)}</text></svg>`;
-    try { return await sharp(Buffer.from(svg)).png().toBuffer(); } catch (_) { return null; }
-}
+const escapeXml = base.escapeXml;
+const truncate = base.truncate;
+const toCircularAvatar = base.toCircularAvatar;
+const placeholderAvatar = base.placeholderAvatar;
 
 /**
  * Gera card 21:9 do menu/ping estilo rank: foto do grupo + infos + cores do tema.
@@ -60,62 +33,42 @@ async function placeholderAvatar(name, size) {
 async function generateMenuImage({ title, headerEmoji, groupName, memberLabel, tagline, footer, badge, theme, avatarRaw, noCover }) {
     const W = OUT_W;
     const H = OUT_H;
-    const C = (theme && theme.colors) ? theme.colors : {};
-    const bg0 = C.bg0 || '#0f0f14';
-    const bg1 = C.bg1 || '#141420';
-    const accent = C.accent || '#6c5ce7';
-    const text = C.text || '#ffffff';
-    const sub = C.sub || '#a0a0b2';
-    // Cor do texto do badge: branco sobre colorido escuro funciona, mas sobre
-    // fundo claro (ex: amarelo do parcial) precisa de texto escuro.
-    const badgeText = C.badgeText || '#fff';
+    const C = base.getColors(theme);
+    const accent = C.accent;
+    const text = C.text;
+    const sub = C.sub;
 
     const AV = 180;
     const avX = 64;
     const avY = Math.round((H - AV) / 2);
     const txX = avX + AV + 40;
 
-    const titleSafe = escapeXml(truncate(title || 'MENU', 30));
-    const groupSafe = escapeXml(truncate(groupName || 'Grupo', 34));
-    const memberSafe = escapeXml(memberLabel || '');
-    const tagSafe = escapeXml(truncate(tagline || '', 48));
-    const footerSafe = escapeXml(truncate(footer || '', 40));
-    const badgeSafe = escapeXml(truncate(badge || '', 14));
+    // Anti-overlap: textos nunca invadem a área do badge superior direito.
+    const hasBadge = !!String(badge || '').trim();
+    const maxX = base.contentMaxX(W, hasBadge);
+    const maxW = Math.max(120, maxX - txX);
+    const tTitle = base.fitText(title || 'MENU', maxW, 52, { weight: 900, maxChars: 30 });
+    const groupLine = `${truncate(groupName || 'Grupo', 34)}${memberLabel ? ` • ${memberLabel}` : ''}`;
+    const tGroup = base.fitText(groupLine, maxW, 28, { weight: 700, maxChars: 52 });
+    const tTag = base.fitText(tagline || '', maxW, 21, { weight: 400, maxChars: 60 });
+    const tFooter = base.fitText(footer || '', maxW, 18, { weight: 400, maxChars: 52 });
     const emojiSafe = escapeXml(headerEmoji || '');
 
-    const baseSvg = `
-    <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="${bg0}"/>
-                <stop offset="100%" stop-color="${bg1}"/>
-            </linearGradient>
-        </defs>
-        <rect width="${W}" height="${H}" fill="url(#bg)"/>
-    </svg>`;
-
-    let buf = await sharp(Buffer.from(baseSvg)).png().toBuffer();
+    let buf = await base.cardBase(W, H, C);
 
     // foto do grupo como fundo esmaecido (pulada no modo noCover: fundo sólido claro)
-    if (!noCover && avatarRaw && Buffer.isBuffer(avatarRaw)) {
-        try {
-            const cover = await sharp(avatarRaw, { failOn: 'none' }).rotate().resize({ width: W, height: H, fit: 'cover' }).jpeg({ quality: 80 }).toBuffer();
-            buf = await sharp(buf).composite([{ input: cover, opacity: 0.22 }]).png().toBuffer();
-            const scrim = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect width="${W}" height="${H}" fill="black" opacity="0.45"/></svg>`);
-            buf = await sharp(buf).composite([{ input: scrim }]).png().toBuffer();
-        } catch (_) {}
-    }
+    if (!noCover) buf = await base.applyCover(buf, avatarRaw, W, H, { opacity: 0.22, scrim: 0.45 });
 
     const textSvg = `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
         <rect x="0" y="0" width="${W}" height="8" fill="${accent}"/>
         <circle cx="${avX + AV / 2}" cy="${avY + AV / 2}" r="${AV / 2 + 5}" fill="none" stroke="${accent}" stroke-width="5"/>
         <text x="${txX}" y="150" font-family="sans-serif" font-size="30" font-weight="800" fill="${sub}">${emojiSafe}</text>
-        <text x="${txX}" y="205" font-family="sans-serif" font-size="52" font-weight="900" fill="${text}">${titleSafe}</text>
-        <text x="${txX}" y="255" font-family="sans-serif" font-size="28" font-weight="700" fill="${text}">${groupSafe}${memberSafe ? ` • ${memberSafe}` : ''}</text>
-        <text x="${txX}" y="305" font-family="sans-serif" font-size="21" fill="${sub}">${tagSafe}</text>
-        ${footerSafe ? `<text x="${txX}" y="345" font-family="sans-serif" font-size="18" fill="${sub}">${footerSafe}</text>` : ''}
-        ${badgeSafe ? `<rect x="${W - 260}" y="40" width="212" height="48" rx="24" fill="${accent}"/><text x="${W - 154}" y="72" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="800" fill="${badgeText}">${badgeSafe}</text>` : ''}
+        <text x="${txX}" y="205" font-family="sans-serif" font-size="${tTitle.fontSize}" font-weight="900" fill="${text}">${tTitle.text}</text>
+        <text x="${txX}" y="255" font-family="sans-serif" font-size="${tGroup.fontSize}" font-weight="700" fill="${text}">${tGroup.text}</text>
+        <text x="${txX}" y="305" font-family="sans-serif" font-size="${tTag.fontSize}" fill="${sub}">${tTag.text}</text>
+        ${tFooter.text ? `<text x="${txX}" y="345" font-family="sans-serif" font-size="${tFooter.fontSize}" fill="${sub}">${tFooter.text}</text>` : ''}
+        ${base.badgeSvg(W, badge, C)}
         <rect x="32" y="${H - 14}" width="${W - 64}" height="2" fill="${accent}" opacity="0.5"/>
     </svg>`;
 
@@ -129,7 +82,7 @@ async function generateMenuImage({ title, headerEmoji, groupName, memberLabel, t
         if (circ) buf = await sharp(buf).composite([{ input: circ, left: avX, top: avY }]).png().toBuffer();
     } catch (_) {}
 
-    return await sharp(buf).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    return await base.finalizeJpeg(buf);
 }
 function cachePathFor(jid) {
     const hash = crypto.createHash('md5').update(String(jid || '')).digest('hex');

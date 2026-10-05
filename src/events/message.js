@@ -476,7 +476,9 @@ async function _handleSingleMessage(sock, m, { commands, config, startTime }) {
             // continuar em background após o "interrompido".
             const CMD_TIMEOUT_MS = cmd.category === 'mídia'
                 ? (Number(process.env.CMD_TIMEOUT_MEDIA_MS) || 210000)
-                : (Number(process.env.CMD_TIMEOUT_MS) || 90000);
+                : cmd.category === 'ai'
+                    ? (Number(process.env.CMD_TIMEOUT_AI_MS) || 120000)
+                    : (Number(process.env.CMD_TIMEOUT_MS) || 90000);
             // Trilha p/ bug-hunting: 1 linha JSON por execução (logs/agent_*.jsonl).
             // cid = message id — liga INTERAÇÃO → passos → erro sem adivinhar por timestamp.
             const _auditBase = () => {

@@ -1,21 +1,10 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
+const base = require('./imageBase');
 
-function escapeXml(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-function truncate(s, n) {
-    s = String(s || '');
-    if (s.length <= n) return s;
-    return s.slice(0, n - 1) + '…';
-}
+const escapeXml = base.escapeXml;
+const truncate = base.truncate;
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const COLORS = {
@@ -35,23 +24,11 @@ const AVATAR_SIZE = 56;
 
 // Gera buffer circular a partir de imagem quadrada
 async function toCircularAvatar(buf, size = AVATAR_SIZE) {
-    try {
-        const resized = await sharp(buf, { failOn: 'none' }).resize(size, size, { fit: 'cover' }).png().toBuffer();
-        const circleSvg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="white"/></svg>`;
-        const rounded = await sharp(resized).composite([{ input: Buffer.from(circleSvg), blend: 'dest-in' }]).png().toBuffer();
-        return rounded;
-    } catch (_) { return null; }
+    return base.toCircularAvatar(buf, size || AVATAR_SIZE);
 }
 
 async function placeholderAvatar(name, size = AVATAR_SIZE) {
-    const letter = String(name || '?').trim()[0]?.toUpperCase() || '?';
-    // cor determinística pelo nome
-    let hash = 0; for (let i=0;i<String(name).length;i++) hash = (hash*31 + String(name).charCodeAt(i)) >>> 0;
-    const hues = [260, 200, 160, 340, 30, 45, 280];
-    const hue = hues[hash % hues.length];
-    const bg = `hsl(${hue}, 68%, 48%)`;
-    const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${size/2}" fill="${bg}"/><text x="${size/2}" y="${size/2+7}" text-anchor="middle" font-family="sans-serif" font-size="${Math.round(size*0.5)}" font-weight="800" fill="white">${escapeXml(letter)}</text></svg>`;
-    try { return await sharp(Buffer.from(svg)).png().toBuffer(); } catch (_) { return null; }
+    return base.placeholderAvatar(name, size || AVATAR_SIZE);
 }
 
 /**
@@ -66,8 +43,8 @@ async function placeholderAvatar(name, size = AVATAR_SIZE) {
  */
 async function generateRankImage({ groupName, botName, monthLabel, ranking, monthKey, theme, groupAvatar }) {
     const top = Array.isArray(ranking) ? ranking.slice(0, 10) : [];
-    const C = (theme && theme.colors) ? { ...COLORS, ...theme.colors } : COLORS;
-    const rankTitle = (theme && theme.rankTitle) || 'RANK MENSAL — TOP 10 ATIVOS';
+    const C = base.getColors(theme, COLORS);
+    const rankTitleRaw = (theme && theme.rankTitle) || 'RANK MENSAL — TOP 10 ATIVOS';
     const rankIcon = (theme && theme.rankIcon) || '🏆';
     const emptyLine = (theme && theme.rankEmpty) || 'Nenhum registro este mês. Seja o primeiro a falar! 💬';
     const W = 1080;
@@ -83,6 +60,10 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
     const titleX = hasGroupAvatar ? 170 : 110;
     const groupAvatarCX = PAD + GROUP_AVATAR_SIZE / 2;
     const groupAvatarCY = 78;
+    // Anti-overlap: título do header nunca invade o badge do mês.
+    const rankTitleFit = base.fitText(rankTitleRaw, Math.max(200, base.contentMaxX(W, true) - titleX), 38, { weight: 900, maxChars: 40 });
+    const rankTitle = rankTitleFit.text;
+    const rankTitleSize = rankTitleFit.fontSize;
 
     // Guarda avatares crus para gerar depois do scale (precisa do scale do density)
     const rawAvatars = top.map(u => (u.avatar && Buffer.isBuffer(u.avatar) ? u.avatar : null));
@@ -103,12 +84,13 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
             const max = top[0]?.count || 1;
             const barW = Math.max(40, Math.round((count / max) * 220));
 
-            // posição: medal | avatar | nome | count
+            // posição: medal | avatar | nome | count (nome limitado p/ não invadir o count)
             const medalX = 36;
             const avatarX = 84; // avatar 56px, deixa medal + gap
             const nameX = 160;
             const countX = W - 180;
             const avatarBorder = isTop3 ? borderColor : '#2a2a3a';
+            const nameFit = base.fitText(truncate(u.name, 24), Math.max(120, countX - 130 - nameX), 26, { weight: 700, maxChars: 26 });
 
             return `
             <g>
@@ -118,7 +100,7 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
                 <!-- avatar placeholder border (imagem real vem via composite) -->
                 <circle cx="${avatarX + AVATAR_SIZE/2}" cy="${y + (ROW_H-8)/2}" r="${AVATAR_SIZE/2 + 2}" fill="none" stroke="${avatarBorder}" stroke-width="2"/>
                 <!-- nome -->
-                <text x="${nameX}" y="${y + 32}" font-family="sans-serif" font-size="26" font-weight="700" fill="${C.text}">${name}</text>
+                <text x="${nameX}" y="${y + 32}" font-family="sans-serif" font-size="${nameFit.fontSize}" font-weight="700" fill="${C.text}">${nameFit.text}</text>
                 <text x="${nameX}" y="${y + 54}" font-family="sans-serif" font-size="16" fill="${C.sub}">${isTop3 ? '★ TOP '+ (i+1) : 'ativo do mês'}</text>
                 <!-- count -->
                 <text x="${countX}" y="${y + 40}" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="800" fill="${C.text}">${escapeXml(countLabel)}</text>
@@ -132,12 +114,12 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
         <rect x="0" y="0" width="${W}" height="6" fill="${C.accent}"/>
         ${hasGroupAvatar ? `<circle cx="${groupAvatarCX}" cy="${groupAvatarCY}" r="${GROUP_AVATAR_SIZE / 2 + 3}" fill="none" stroke="${C.accent}" stroke-width="3"/>` : `<!-- ícone troféu -->
         <text x="${PAD}" y="85" font-family="sans-serif" font-size="56">${escapeXml(rankIcon)}</text>`}
-        <text x="${titleX}" y="70" font-family="sans-serif" font-size="38" font-weight="900" fill="${C.text}">${escapeXml(rankTitle)}</text>
-        <text x="${titleX}" y="105" font-family="sans-serif" font-size="22" font-weight="600" fill="${C.sub}">${escapeXml(truncate(groupName || 'Grupo', 42))} • ${escapeXml(monthLabel || '')}</text>
+        <text x="${titleX}" y="70" font-family="sans-serif" font-size="${rankTitleSize}" font-weight="900" fill="${C.text}">${rankTitle}</text>
+        <text x="${titleX}" y="105" font-family="sans-serif" font-size="22" font-weight="600" fill="${C.sub}">${base.fitText(`${truncate(groupName || 'Grupo', 42)} • ${monthLabel || ''}`, Math.max(200, base.contentMaxX(W, true) - titleX), 22, { weight: 600, maxChars: 56 }).text}</text>
         <text x="${titleX}" y="135" font-family="sans-serif" font-size="16" fill="${C.sub}">${escapeXml(botName || 'Bot')} • reseta todo dia 1 • ${escapeXml(monthKey || '')}</text>
         <!-- badge mês -->
         <rect x="${W - 240}" y="32" width="208" height="42" rx="21" fill="${C.accent}"/>
-        <text x="${W - 136}" y="60" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="#fff">${escapeXml((monthLabel || '').toUpperCase().slice(0,22))}</text>
+        <text x="${W - 136}" y="60" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="${C.badgeText || '#fff'}">${escapeXml((monthLabel || '').toUpperCase().slice(0,22))}</text>
         <!-- linha divisória -->
         <rect x="${PAD}" y="${HEADER_H - 12}" width="${W - PAD*2}" height="1" fill="#2a2a3a"/>
     `;
@@ -213,7 +195,7 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
     }
 
     // Mantém 1080px (máximo útil) mas com JPEG otimizado — antes era 3300px por density 220
-    buf = await sharp(buf).resize({ width: 1080 }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    buf = await base.finalizeJpeg(buf);
 
     return buf;
 }
@@ -231,8 +213,10 @@ async function generateRankImage({ groupName, botName, monthLabel, ranking, mont
 async function generateRankGlobalImage({ botName, monthLabel, monthKey, ranking, topGroups, theme }) {
     const top = Array.isArray(ranking) ? ranking.slice(0, 10) : [];
     const groups = Array.isArray(topGroups) ? topGroups.slice(0, 3) : [];
-    const C = (theme && theme.colors) ? { ...COLORS, ...theme.colors } : COLORS;
-    const rankTitle = 'RANK GLOBAL — TOP 10';
+    const C = base.getColors(theme, COLORS);
+    const rankTitleFit = base.fitText('RANK GLOBAL — TOP 10', Math.max(200, base.contentMaxX(1080, true) - 110), 38, { weight: 900, maxChars: 40 });
+    const rankTitle = rankTitleFit.text;
+    const rankTitleSize = rankTitleFit.fontSize;
     const rankIcon = (theme && theme.rankIcon) || '🌍';
     const W = 1080;
     const HEADER_H = 200;
@@ -299,13 +283,14 @@ async function generateRankGlobalImage({ botName, monthLabel, monthKey, ranking,
             const countX = W - 180;
             const avatarBorder = isTop3 ? borderColor : '#2a2a3a';
             const extra = (u.groups && Number(u.groups) > 1) ? ` • ${u.groups} grupos` : ' • global';
+            const nameFitG = base.fitText(truncate(u.name, 24), Math.max(120, countX - 130 - nameX), 26, { weight: 700, maxChars: 26 });
             return `
             <g>
                 <rect x="${PAD}" y="${y}" width="${W - PAD*2}" height="${ROW_H - 8}" rx="14" fill="${bg}" stroke="${borderColor}" stroke-width="${isTop3 ? 2 : 0}"/>
                 <text x="${medalX}" y="${y + 44}" font-family="sans-serif" font-size="${i < 3 ? 34 : 24}" font-weight="700" fill="${isTop3 ? borderColor : C.sub}">${escapeXml(medal)}</text>
                 <circle cx="${avatarX + AVATAR_SIZE/2}" cy="${y + (ROW_H-8)/2}" r="${AVATAR_SIZE/2 + 2}" fill="none" stroke="${avatarBorder}" stroke-width="2"/>
-                <text x="${nameX}" y="${y + 32}" font-family="sans-serif" font-size="26" font-weight="700" fill="${C.text}">${name}</text>
-                <text x="${nameX}" y="${y + 54}" font-family="sans-serif" font-size="16" fill="${C.sub}">${isTop3 ? '★ TOP '+ (i+1) : 'top global'}${escapeXml(extra)}</text>
+                <text x="${nameX}" y="${y + 32}" font-family="sans-serif" font-size="${nameFitG.fontSize}" font-weight="700" fill="${C.text}">${nameFitG.text}</text>
+                <text x="${nameX}" y="${y + 54}" font-family="sans-serif" font-size="16" fill="${C.sub}">${isTop3 ? '★ TOP '+ (i+1) : 'top global'}${escapeXml(truncate(extra, 24))}</text>
                 <text x="${countX}" y="${y + 40}" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="800" fill="${C.text}">${escapeXml(countLabel)}</text>
                 <rect x="${countX - 110}" y="${y + 48}" width="${barW}" height="6" rx="3" fill="${isTop3 ? borderColor : C.accent}" opacity="0.95"/>
             </g>`;
@@ -315,11 +300,11 @@ async function generateRankGlobalImage({ botName, monthLabel, monthKey, ranking,
         <rect x="0" y="0" width="${W}" height="${HEADER_H}" rx="0" fill="${C.headerBg}"/>
         <rect x="0" y="0" width="${W}" height="6" fill="${C.accent}"/>
         <text x="${PAD}" y="85" font-family="sans-serif" font-size="56">${escapeXml(rankIcon)}</text>
-        <text x="110" y="70" font-family="sans-serif" font-size="38" font-weight="900" fill="${C.text}">${escapeXml(rankTitle)}</text>
-        <text x="110" y="105" font-family="sans-serif" font-size="22" font-weight="600" fill="${C.sub}">Top 10 pessoas mais conversadoras • ${escapeXml(monthLabel || '')}</text>
+        <text x="110" y="70" font-family="sans-serif" font-size="${rankTitleSize}" font-weight="900" fill="${C.text}">${rankTitle}</text>
+        <text x="110" y="105" font-family="sans-serif" font-size="22" font-weight="600" fill="${C.sub}">${base.fitText(`Top 10 pessoas mais conversadoras • ${monthLabel || ''}`, Math.max(200, base.contentMaxX(W, true) - 110), 22, { weight: 600, maxChars: 56 }).text}</text>
         <text x="110" y="135" font-family="sans-serif" font-size="16" fill="${C.sub}">${escapeXml(botName || 'Bot')} • todos os grupos • reseta dia 1 • ${escapeXml(monthKey || '')}</text>
         <rect x="${W - 240}" y="32" width="208" height="42" rx="21" fill="${C.accent}"/>
-        <text x="${W - 136}" y="60" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="#fff">${escapeXml((monthLabel || '').toUpperCase().slice(0,22))}</text>
+        <text x="${W - 136}" y="60" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="800" fill="${C.badgeText || '#fff'}">${escapeXml((monthLabel || '').toUpperCase().slice(0,22))}</text>
         <rect x="${PAD}" y="${HEADER_H - 12}" width="${W - PAD*2}" height="1" fill="#2a2a3a"/>
     `;
 
@@ -392,7 +377,7 @@ async function generateRankGlobalImage({ botName, monthLabel, monthKey, ranking,
         console.warn('⚠️ [rankGlobalImage] falha composite avatares:', e.message);
     }
 
-    buf = await sharp(buf).resize({ width: 1080 }).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    buf = await base.finalizeJpeg(buf);
     return buf;
 }
 

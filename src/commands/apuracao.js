@@ -111,6 +111,12 @@ module.exports = {
         }
 
         try {
+            let theme = null;
+            try {
+                const { getTheme } = require('../services/themes');
+                const tid = typeof utils.getThemeForJid === 'function' ? utils.getThemeForJid(from) : 'default';
+                theme = getTheme(tid);
+            } catch (_) { theme = null; }
             const img = await generateApuracaoImage({
                 candidatos: withFmt,
                 turno,
@@ -122,6 +128,7 @@ module.exports = {
                 atualizacao: data.atualizacao,
                 finalizada: data.finalizada,
                 botName,
+                theme,
                 resumo: {
                     validos: apuracao.fmtInt(data.votos.validos),
                     brancos: apuracao.fmtInt(data.votos.brancos),

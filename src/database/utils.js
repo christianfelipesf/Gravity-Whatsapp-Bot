@@ -748,7 +748,7 @@ const DEFAULT_CONFIG = {
     showLogoInMenu: true,
     voiceEffects: true,
     aiModel: "deepseek/deepseek-v4.1-flash:floor",
-    aiMaxTokens: 500,
+    aiMaxTokens: 1000,
     aiTemperature: 0.7,
     aiMaxPromptLength: 2000,
     aiCacheTtl: 300000,

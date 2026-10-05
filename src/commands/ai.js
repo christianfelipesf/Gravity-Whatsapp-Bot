@@ -54,8 +54,12 @@ module.exports = {
             } catch (_) { /* sem contexto, segue só com a pergunta */ }
 
             const result = await model.generateContent(prompt, { signal: abortSignal });
+            // Anti-zumbi: o dispatcher já avisou timeout e liberou o handler.
+            // Se abortou durante a chamada, não envia a resposta tardia.
+            if (abortSignal?.aborted) return lastBotResponse;
             const text = String(result.response.text() ?? '').trim();
             if (!text) throw new Error('Resposta vazia da IA');
+            if (abortSignal?.aborted) return lastBotResponse;
             await sock.sendMessage(from, { text }, { quoted: m }); 
             return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
         } catch (e) {

@@ -1,63 +1,22 @@
 const axios = require('axios');
 const sharp = require('sharp');
+const base = require('./imageBase');
 
 // Card 21:9 — mesma escala do !menu (1080x463)
 const W = 1080;
 const H = 463;
 const AV = 220;
 
-function escapeXml(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-function truncate(s, n) {
-    s = String(s || '');
-    if (s.length <= n) return s;
-    return s.slice(0, n - 1) + '…';
-}
-
-// Quebra texto em linhas de no máx. maxChars sem cortar palavras.
-function wrapLines(s, maxChars, maxLines) {
-    const words = String(s || '').split(/\s+/).filter(Boolean);
-    const lines = [];
-    let cur = '';
-    for (const w of words) {
-        const next = cur ? cur + ' ' + w : w;
-        if (next.length <= maxChars) {
-            cur = next;
-        } else {
-            if (cur) lines.push(cur);
-            cur = w.length > maxChars ? w.slice(0, maxChars - 1) + '…' : w;
-            if (lines.length >= maxLines) break;
-        }
-    }
-    if (cur && lines.length < maxLines) lines.push(cur);
-    return lines.slice(0, maxLines);
-}
+const escapeXml = base.escapeXml;
+const truncate = base.truncate;
+const wrapLines = base.wrapLines;
 
 async function toCircularAvatar(buf, size) {
-    try {
-        const resized = await sharp(buf, { failOn: 'none' }).resize(size, size, { fit: 'cover' }).png().toBuffer();
-        const circleSvg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/></svg>`;
-        return await sharp(resized).composite([{ input: Buffer.from(circleSvg), blend: 'dest-in' }]).png().toBuffer();
-    } catch (_) { return null; }
+    return base.toCircularAvatar(buf, size);
 }
 
 async function placeholderAvatar(name, size) {
-    const clean = String(name || '').replace(/^@+/, '').trim();
-    const alnum = clean.match(/[\p{L}\p{N}]/u);
-    const letter = (alnum ? alnum[0] : '?').toUpperCase();
-    let hash = 0;
-    for (let i = 0; i < String(name).length; i++) hash = (hash * 31 + String(name).charCodeAt(i)) >>> 0;
-    const hues = [260, 200, 160, 340, 30, 45, 280];
-    const hue = hues[hash % hues.length];
-    const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="hsl(${hue}, 68%, 48%)"/><text x="${size / 2}" y="${size / 2 + Math.round(size * 0.13)}" text-anchor="middle" font-family="sans-serif" font-size="${Math.round(size * 0.5)}" font-weight="800" fill="white">${escapeXml(letter)}</text></svg>`;
-    try { return await sharp(Buffer.from(svg)).png().toBuffer(); } catch (_) { return null; }
+    return base.placeholderAvatar(name, size);
 }
 
 function isImageBuffer(buf) {
@@ -210,11 +169,11 @@ async function getUserAvatarBuffer(sock, userJid, groupJid, groupMetadataCached,
  * @param {Object} opts.theme - entrada do catálogo themes.js (usa .colors)
  */
 async function generateWelcomeImage({ mode, userName, actorName, groupName, memberCount, message, avatarRaw, actorAvatarRaw, groupAvatarRaw, theme }) {
-    const C = (theme && theme.colors) ? theme.colors : {};
-    const bg0 = C.bg0 || '#060f24';
-    const bg1 = C.bg1 || '#0a1c44';
-    const text = C.text || '#ffffff';
-    const sub = C.sub || '#93c5fd';
+    const C = base.getColors(theme, { bg0: '#060f24', bg1: '#0a1c44', text: '#ffffff', sub: '#93c5fd' });
+    const bg0 = C.bg0;
+    const bg1 = C.bg1;
+    const text = C.text;
+    const sub = C.sub;
 
     const isBye = mode === 'goodbye';
     const isPromote = mode === 'promote';
@@ -231,12 +190,6 @@ async function generateWelcomeImage({ mode, userName, actorName, groupName, memb
         : isGroupChange ? 'GRUPO ATUALIZADO ⚙️'
         : 'BEM-VINDO 👋';
 
-    const nameSafe = escapeXml(truncate(userName || 'Novo membro', 22));
-    const actorSafe = escapeXml(truncate(actorName || '', 22));
-    const groupSafe = escapeXml(truncate(groupName || 'o grupo', 30));
-    const countSafe = memberCount ? escapeXml(`• ${memberCount} membros`) : '';
-    const msgLines = wrapLines(message || '', 44, 2).map(escapeXml);
-
     // Layout 21:9 estilo menu: avatar à esquerda, textos à direita.
     // Promoção/rebaixamento com autor: 2 avatares empilhados (autor em cima,
     // alvo embaixo) e textos deslocados.
@@ -248,30 +201,19 @@ async function generateWelcomeImage({ mode, userName, actorName, groupName, memb
     const avY2 = avY + avSize + 20;
     const txX = avX + avSize + 36;
 
-    const baseSvg = `
-    <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="${bg0}"/>
-                <stop offset="100%" stop-color="${bg1}"/>
-            </linearGradient>
-        </defs>
-        <rect width="${W}" height="${H}" fill="url(#bg)"/>
-    </svg>`;
+    // Anti-overlap: sem badge neste card, mas nome/grupo limitados à borda direita.
+    const maxW = Math.max(160, W - 56 - txX);
+    const tName = base.fitText(userName || 'Novo membro', maxW, hasActor ? 44 : 46, { weight: 900, maxChars: 24 });
+    const tActor = base.fitText(actorName || '', maxW - 40, 23, { weight: 700, maxChars: 24 });
+    const tGroup = base.fitText(`${truncate(groupName || 'o grupo', 30)}${memberCount ? ` • ${memberCount} membros` : ''}`, maxW, hasActor ? 23 : 24, { weight: 700, maxChars: 44 });
+    const tTitle = base.fitText(title, maxW, hasActor ? 34 : 36, { weight: 900, maxChars: 28 });
 
-    let buf = await sharp(Buffer.from(baseSvg)).png().toBuffer();
+    let buf = await base.cardBase(W, H, C);
 
     // Fundo: foto do grupo esmaecida (igual ao !menu). Fallback: foto da pessoa.
     const bgRaw = (groupAvatarRaw && Buffer.isBuffer(groupAvatarRaw)) ? groupAvatarRaw
         : (avatarRaw && Buffer.isBuffer(avatarRaw) ? avatarRaw : null);
-    if (bgRaw) {
-        try {
-            const cover = await sharp(bgRaw, { failOn: 'none' }).rotate().resize({ width: W, height: H, fit: 'cover' }).jpeg({ quality: 80 }).toBuffer();
-            buf = await sharp(buf).composite([{ input: cover, opacity: 0.30 }]).png().toBuffer();
-            const scrim = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect width="${W}" height="${H}" fill="black" opacity="0.5"/></svg>`);
-            buf = await sharp(buf).composite([{ input: scrim }]).png().toBuffer();
-        } catch (_) {}
-    }
+    buf = await base.applyCover(buf, bgRaw, W, H, { opacity: 0.30, scrim: 0.5 });
 
     const cy = avY + avSize / 2;
     const cy2 = hasActor ? avY2 + avSize / 2 : 0;
@@ -285,19 +227,23 @@ async function generateWelcomeImage({ mode, userName, actorName, groupName, memb
     if (hasActor) {
         // Alvo em destaque + quem fez a ação logo abaixo.
         textSvg += `
-        <text x="${txX}" y="120" font-family="sans-serif" font-size="34" font-weight="900" fill="${text}">${escapeXml(title)}</text>
-        <text x="${txX}" y="180" font-family="sans-serif" font-size="44" font-weight="900" fill="${text}">${nameSafe}</text>
-        <text x="${txX}" y="222" font-family="sans-serif" font-size="23" font-weight="700" fill="${sub}">por ${actorSafe}</text>
-        <text x="${txX}" y="262" font-family="sans-serif" font-size="23" font-weight="700" fill="${sub}">${groupSafe}${countSafe ? ` ${countSafe}` : ''}</text>`;
+        <text x="${txX}" y="120" font-family="sans-serif" font-size="${tTitle.fontSize}" font-weight="900" fill="${text}">${tTitle.text}</text>
+        <text x="${txX}" y="180" font-family="sans-serif" font-size="${tName.fontSize}" font-weight="900" fill="${text}">${tName.text}</text>
+        <text x="${txX}" y="222" font-family="sans-serif" font-size="23" font-weight="700" fill="${sub}">por ${tActor.text}</text>
+        <text x="${txX}" y="262" font-family="sans-serif" font-size="23" font-weight="700" fill="${sub}">${tGroup.text}</text>`;
     } else {
         textSvg += `
-        <text x="${txX}" y="150" font-family="sans-serif" font-size="36" font-weight="900" fill="${text}">${escapeXml(title)}</text>
-        <text x="${txX}" y="214" font-family="sans-serif" font-size="46" font-weight="900" fill="${text}">${nameSafe}</text>
-        <text x="${txX}" y="258" font-family="sans-serif" font-size="24" font-weight="700" fill="${sub}">${groupSafe}${countSafe ? ` ${countSafe}` : ''}</text>`;
+        <text x="${txX}" y="150" font-family="sans-serif" font-size="${tTitle.fontSize}" font-weight="900" fill="${text}">${tTitle.text}</text>
+        <text x="${txX}" y="214" font-family="sans-serif" font-size="${tName.fontSize}" font-weight="900" fill="${text}">${tName.text}</text>
+        <text x="${txX}" y="258" font-family="sans-serif" font-size="${tGroup.fontSize}" font-weight="700" fill="${sub}">${tGroup.text}</text>`;
     }
+    // Mensagem custom: só quantas linhas cabem até a barra inferior (anti-estouro).
     let lineY = hasActor ? 306 : 302;
+    const maxMsgLines = Math.max(0, Math.min(2, Math.floor((H - 40 - lineY) / 36)));
+    const msgLines = wrapLines(message || '', 44, maxMsgLines).map(escapeXml);
     for (const ln of msgLines) {
-        textSvg += `<text x="${txX}" y="${lineY}" font-family="sans-serif" font-size="21" fill="${text}">${ln}</text>`;
+        const lFit = base.fitText(ln, maxW, 21, { weight: 400, maxChars: 48 });
+        textSvg += `<text x="${txX}" y="${lineY}" font-family="sans-serif" font-size="${lFit.fontSize}" fill="${text}">${lFit.text}</text>`;
         lineY += 36;
     }
     textSvg += `
@@ -323,7 +269,7 @@ async function generateWelcomeImage({ mode, userName, actorName, groupName, memb
         }
     } catch (_) {}
 
-    return await sharp(buf).jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+    return await base.finalizeJpeg(buf);
 }
 
 module.exports = {

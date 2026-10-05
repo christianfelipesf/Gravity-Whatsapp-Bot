@@ -200,8 +200,10 @@ module.exports = {
 
             const finalPrompt = `${OWNER_SYSTEM}\n\n[Evidências]\n${evidence.text}\n\nPergunta do dono:\n${qShort}`;
             const result = await model.generateContent(finalPrompt, { signal: abortSignal });
+            if (abortSignal?.aborted) return currentBotResponse;
             const text = String(result.response.text() ?? '').trim();
             if (!text) throw new Error('Resposta vazia da IA');
+            if (abortSignal?.aborted) return currentBotResponse;
             await sock.sendMessage(from, { text }, { quoted: m });
             return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
         } catch (e) {
