@@ -19,7 +19,7 @@ module.exports = {
 
         const p = config.prefix;
         const B = theme.bullet || '│';
-        let menuText = `*${currentBotName}* ${theme.header}\n_${theme.tagline}_\n\n` +
+        let menuText = `*${currentBotName}* ${theme.header}\n_comandos principais_\n\n` +
             `╭─── *GERAL* ───\n` +
             `${B} 🏆 *${p}rank* — top 10 ativos do mês (alias ${p}rankativos)\n` +
             `${B} 🌍 *${p}rankglobal* — top global + foto dos grupos\n` +
@@ -76,9 +76,9 @@ module.exports = {
                     headerEmoji: theme.header,
                     groupName,
                     memberLabel,
-                    tagline: theme.tagline,
-                    footer: theme.menuTitle,
-                    badge: theme.id === 'default' ? 'MENU' : theme.id.toUpperCase(),
+                    tagline: 'comandos principais',
+                    footer: 'Menu Principal',
+                    badge: 'MENU',
                     theme,
                     avatarRaw
                 });

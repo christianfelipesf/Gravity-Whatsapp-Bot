@@ -23,7 +23,7 @@ const placeholderAvatar = base.placeholderAvatar;
  * @param {string} opts.groupName
  * @param {string} opts.memberLabel - ex: "128 membros"
  * @param {string} opts.tagline
- * @param {string} opts.footer - nome do tema pequeno no rodapé (ex: "FORNALHA INFERNAL")
+ * @param {string} opts.footer - texto pequeno no rodapé (ex: "Menu Principal")
  * @param {string} opts.badge - ex: "HELL"
  * @param {Object} opts.theme - entrada do catálogo themes.js (usa .colors)
  * @param {Buffer} opts.avatarRaw - foto do grupo (opcional)

@@ -145,9 +145,9 @@ module.exports = {
                     headerEmoji: theme.header,
                     groupName,
                     memberLabel: latencyLabel,
-                    tagline: theme.tagline,
-                    footer: theme.menuTitle,
-                    badge: theme.id === 'default' ? 'PING' : theme.id.toUpperCase(),
+                    tagline: 'teste de conexão',
+                    footer: 'Menu Principal',
+                    badge: 'PING',
                     theme,
                     avatarRaw
                 });

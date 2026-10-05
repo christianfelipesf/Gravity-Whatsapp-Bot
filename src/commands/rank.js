@@ -141,11 +141,11 @@ module.exports = {
             }
         }
 
-        // Texto fallback curto para caption
-        let caption = `*${botName} — ${theme.id === 'default' ? 'Rank Mensal' : theme.menuTitle.replace(/^MENU\s+/, 'RANK ')}* ${theme.rankIcon || '🏆'}\n_top 10 mais ativos_\n\n`;
+        // Texto fallback curto para caption (título sempre genérico — slogan fica só no !tema)
+        let caption = `*${botName} — Rank Mensal* ${theme.rankIcon || '🏆'}\n_top 10 mais ativos_\n\n`;
         caption += `${theme.bullet || '📅'} *Mês:* ${monthLabel} (${monthKey})\n`;
         caption += `👥 *Grupo:* ${groupName}\n`;
-        caption += `${isPartial ? '🟡 *Modo:* Parcial (subativo)\n' : (theme.id === 'hell' ? '🔥 *Modo:* Fornalha ativa\n' : '🟢 *Modo:* Ativo\n')}`;
+        caption += `${isPartial ? '🟡 *Modo:* Parcial (subativo)\n' : '🟢 *Modo:* Ativo\n'}`;
         caption += `🔄 *Reseta:* todo dia 1\n`;
         caption += `────────────────\n`;
         if (!ranking || ranking.length === 0) {
