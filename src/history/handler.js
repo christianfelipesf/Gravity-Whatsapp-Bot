@@ -1,8 +1,8 @@
 // src/history/handler.js — ponte do hot path para a camada de histórico.
 //
 // REGRA: eventos e comandos chamam este módulo, NUNCA o painel
-// (`src/dashboard/dashboard`). O painel, quando ativo, recebe tudo por
-// espelho via store.setMirror() — direção: dashboard -> history.
+// (`src/dashboard/dashboard`, arquivado — usar `dashboardStub` se precisar).
+// Espelho via store.setMirror() segue disponível, sem consumidores.
 
 const {
     getMediaMessage, getContextInfo, getMessageText,

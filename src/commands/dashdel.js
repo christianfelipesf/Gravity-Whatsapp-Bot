@@ -1,4 +1,4 @@
-const dashboard = require('../dashboard/dashboard');
+const dashboard = require('../services/dashboardStub');
 
 module.exports = {
     name: 'dashdel',

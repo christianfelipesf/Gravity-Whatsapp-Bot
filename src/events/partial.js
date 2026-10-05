@@ -1,7 +1,7 @@
 // partial.js — lógica do modo parcial (!ativarp) sem dependências.
 // Extraído de events/message.js para ser testável com `node --test`
-// (message.js puxa dashboard/dashboard, que cria setInterval sem unref
-// e travaria o runner de testes).
+// (message.js puxava o dashboard antigo, que criava setInterval sem unref
+// e travaria o runner de testes — painel arquivado, stub não cria timers).
 
 const partialPending = new Map();
 const PARTIAL_PENDING_MAX = 200;

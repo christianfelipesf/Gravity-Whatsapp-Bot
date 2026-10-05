@@ -4,7 +4,7 @@ const {
     groupMetadataCached
 } = require('../database/utils');
 
-const dashboard = require('../dashboard/dashboard');
+const dashboard = require('../services/dashboardStub');
 const { enqueueProcess } = require('../services/queue');
 const safeDashboardLog = (...args) => { try { dashboard.log(...args); } catch (_) {} };
 const safeDashboardCache = (...args) => { try { dashboard.cacheMedia(...args); } catch (_) {} };
@@ -140,7 +140,7 @@ async function handleReaction(sock, m, from, sender, senderName) {
     if (isDashboardEnabled(from)) {
         const targetId = reactionMsg.key.id;
         const emoji = reactionMsg.text || '';
-        const { handleReaction: handleDashReaction } = require('../dashboard/dashboard');
+        const { handleReaction: handleDashReaction } = require('../services/dashboardStub');
         handleDashReaction(targetId, emoji, sender, senderName);
     }
     return true;

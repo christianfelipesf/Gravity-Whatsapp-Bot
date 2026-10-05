@@ -45,7 +45,7 @@ const { loadCommands, commands } = require('./src/commands/loader');
 const { handleGroupParticipantsUpdate, handleGroupUpdate } = require('./src/events/group');
 const { handleMessageUpsert } = require('./src/events/message');
 const { setupAI } = require('./src/services/ai');
-const dashboard = require('./src/dashboard/dashboard');
+        const dashboard = require('./src/services/dashboardStub');
 const news = require('./src/services/news');
 const splash = require('./src/services/splash');
 const subSessions = require('./src/services/subSessions');
@@ -94,7 +94,7 @@ try { require('./src/history/store').ensureHistoryTrimLoop(); } catch (e) {
     console.error('⚠️ [history] falha ao iniciar trim (segue normal):', e.message);
 }
 
-// Iniciar Dashboard (Modular) - totalmente isolado
+// Histórico em banco (dashboardStub.log) — painel web arquivado, só o log permanece.
 try {
     dashboard.init(config);
     dashboard.setGroupsApi(() => {
@@ -199,7 +199,6 @@ try {
 
 /* ========== Boot summary (uma linha por componente, status real) ========== */
 
-const _dashOk = !!dashboard && typeof dashboard.init === 'function';
 const _aiOk = !!require('./src/services/ai').getModel();
 const _sockDir = fs.existsSync('session') ? '✓' : '✗';
 const _nodeVer = process.version;
@@ -211,7 +210,7 @@ console.log(`🤖  ${config.botName.toUpperCase()} • v${require('./src/databas
 console.log('═'.repeat(60));
 console.log(`  📦 comandos     carregando em background...`);
 console.log(`  💾 database     logs • bot.db OK`);
-console.log(`  🌐 dashboard    ${config.dashboardEnabled === false ? '✗ desativado (histórico segue normal)' : (_dashOk ? '✓ módulo ok' : '✗ falhou')} na porta ${config.dashboardPort}`);
+console.log(`  🌐 dashboard    arquivado (só histórico em banco)`);
     console.log(`  🤖 IA OpenRouter ${_aiOk ? '✓ ativa (' + (config.aiModel || 'default') + ')' : '✗ sem API key'}`);
 console.log(`  📰 news         ${config.newsEnabled !== false ? '✓ ativo' : '✗ desativado'}`);
 console.log(`  🎬 ffmpeg       ${_ffmpegChecked ? (_ffmpegFound ? '✓' : 'não encontrado') : '?'}`);
@@ -497,7 +496,7 @@ if (global.__baileysEnabled) {
 } else {
     console.log('⏸️ [Baileys] desligado na inicialização — não iniciando');
     try {
-        const dashboard = require('./src/dashboard/dashboard');
+const dashboard = require('./src/services/dashboardStub');
         dashboard.setConnectionState({ status: 'disconnected', qr: null, phone: null });
     } catch (_) {}
 }

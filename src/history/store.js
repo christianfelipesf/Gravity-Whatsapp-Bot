@@ -1,14 +1,15 @@
 // src/history/store.js — camada própria de histórico (!aidono / !resumir).
 //
 // REGRA: todo código novo de histórico usa este módulo. NUNCA faça
-// `require('../dashboard/dashboard')` em código novo — o painel web é
-// somente leitura desta camada e será removido no futuro. A direção da
+// `require('../dashboard/dashboard')` em código novo — o painel web foi
+// arquivado (branch archive/dashboard); quem precisa do log usa
+// `require('../services/dashboardStub')`. A direção da
 // dependência é: dashboard -> history. history NUNCA -> dashboard.
 //
 // O que fica aqui: escrita e leitura do histórico no SQLite (tabelas
 // dashboard_logs e messages — nomes legados mantidos para não migrar
-// banco). O painel web continua funcionando: ele lê do mesmo banco e,
-// quando ativo, recebe espelho em tempo real via setMirror().
+// banco). O espelho em tempo real (setMirror) segue disponível, sem
+// consumidores no momento.
 
 const fs = require('fs');
 const path = require('path');
