@@ -156,10 +156,10 @@ function init() {
 
     console.log('🚀 [SISTEMA] Bot iniciado — painel online');
 
-    // Higiene deferida (não bloqueia boot): prune 30d + gzip terminal de ontem.
+    // Higiene deferida (não bloqueia boot): prune 7d + gzip terminal de ontem.
     try {
         setTimeout(() => {
-            try { require('./agentLog').pruneOldLogs({ maxDays: 30 }); } catch (_) {}
+            try { require('./agentLog').pruneOldLogs({ maxDays: 7 }); } catch (_) {}
             try { require('./agentLog').gzipYesterdayTerminal(); } catch (_) {}
         }, 30000).unref?.();
     } catch (_) {}

@@ -258,6 +258,10 @@ async function backupCloud({ log = console } = {}) {
     return { ok: true, file };
 }
 
+// Backups pré-pull ficam TODOS dentro de backups/ (nunca na raiz).
+// Rotação: mantém os 7 bot-pre-*.db mais recentes — sem isso a pasta
+// cresce sem limite (um backup por pull do boot).
+const PRE_PULL_KEEP = 7;
 function _backupLocalFile(tag) {
     try {
         const fs = require('fs');
@@ -272,6 +276,13 @@ function _backupLocalFile(tag) {
         const dir = path.dirname(dest);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.copyFileSync(dbPath, dest);
+        try {
+            const files = fs.readdirSync(dir).filter(f => /^bot-pre-.*\.db$/.test(f)).sort();
+            while (files.length > PRE_PULL_KEEP) {
+                const old = files.shift();
+                try { fs.unlinkSync(path.join(dir, old)); } catch (_) {}
+            }
+        } catch (_) {}
         return dest;
     } catch (_) { return null; }
 }

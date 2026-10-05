@@ -68,7 +68,7 @@ function agentCommand(ev = {}) {
 
 // Prune: apaga agent_*.jsonl e terminal_*.log com mais de `maxDays` dias.
 // Roda 1x no boot (deferido) — barato: só readdir + unlink.
-function pruneOldLogs({ maxDays = 30 } = {}) {
+function pruneOldLogs({ maxDays = 7 } = {}) {
     try {
         const dir = path.join(process.cwd(), 'logs');
         if (!fs.existsSync(dir)) return { deleted: 0 };
