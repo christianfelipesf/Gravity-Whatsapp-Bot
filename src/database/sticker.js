@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const ffmpeg = require('fluent-ffmpeg');
+const ffmpeg = require('../services/ffmpeg');
 const sharp = require('sharp');
 const { Image } = require('node-webpmux');
 const { tempDir } = require('./db');

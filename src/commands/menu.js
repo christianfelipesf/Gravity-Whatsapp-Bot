@@ -23,6 +23,7 @@ module.exports = {
             `╭─── *GERAL* ───\n` +
             `${B} 🏆 *${p}rank* — top 10 ativos do mês (alias ${p}rankativos)\n` +
             `${B} 🌍 *${p}rankglobal* — top global + foto dos grupos\n` +
+            `${B} 🗳️ *${p}apuracao* — presidente em tempo real, com foto (alias ${p}eleicao)\n` +
             `${B} 👤 *${p}perfil* — foto do perfil\n` +
             `${B} 📊 *${p}status* — info do bot\n` +
             `${B} 🤖 *${p}ai* <texto> — conversa com IA\n` +

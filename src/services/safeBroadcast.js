@@ -109,6 +109,63 @@ async function runSafeBroadcast(sock, targets, makePayload, opts = {}) {
     return { sent, failed, total: targets.length, stopped, elapsedMs: Date.now() - t0 };
 }
 
+/**
+ * Resolve os alvos reais do broadcast: grupos onde o bot ESTÁ dentro
+ * e que estão ativos (total) ou parciais.
+ *
+ * Por que filtrar? O banco acumula lixo: quando o bot sai/é removido/banido
+ * de um grupo, ninguém apagava a linha de active_groups — o /broadcast
+ * anunciava N grupos mas parte deles já estava morta (só gerava falha).
+ * Aqui o morto é desativado de verdade (total+parcial) e sai da contagem.
+ *
+ * Se não der para ler a lista real (socket sem groupFetchAllParticipating
+ * ou desconectado), cai para o comportamento antigo (só banco) e avisa
+ * via membershipOk:false — nunca quebra o broadcast por causa disso.
+ *
+ * @param {object} sock socket Baileys
+ * @param {object} [deps] injeção p/ testes { listActive, listPartial, deactivate }
+ *   (default: banco real — NUNCA usar o banco real em testes que simulam
+ *   presença parcial, senão grupos de verdade são podados!)
+ * @returns {Promise<{groups:string[], pruned:string[], membershipOk:boolean, activeCount:number, partialCount:number}>}
+ */
+async function resolveBroadcastTargets(sock, deps) {
+    const utils = require('../database/utils');
+    const listActive = (deps && deps.listActive) || (() => utils.listActiveGroups());
+    const listPartial = (deps && deps.listPartial) || (() => utils.listPartialGroups());
+    const deactivate = (deps && deps.deactivate) || ((j) => utils.deactivateGroup(j));
+    const actives = listActive().filter((j) => j && j.endsWith('@g.us'));
+    const partials = listPartial().filter((j) => j && j.endsWith('@g.us') && !actives.includes(j));
+
+    let membership = null;
+    try {
+        if (sock && typeof sock.groupFetchAllParticipating === 'function') {
+            const participating = await sock.groupFetchAllParticipating();
+            if (participating && typeof participating === 'object') membership = new Set(Object.keys(participating));
+        }
+    } catch (_) { membership = null; }
+
+    let groups = [...actives, ...partials];
+    const pruned = [];
+    if (membership) {
+        const stale = groups.filter((j) => !membership.has(j));
+        for (const j of stale) {
+            try { deactivate(j); pruned.push(j); } catch (_) {}
+        }
+        if (pruned.length) {
+            try { console.log(`🧹 [broadcast] ${pruned.length} grupo(s) morto(s) podado(s) (bot fora): ${pruned.join(',').slice(0, 200)}`); } catch (_) {}
+        }
+        groups = groups.filter((j) => membership.has(j));
+    }
+    const inSet = new Set(groups);
+    return {
+        groups,
+        pruned,
+        membershipOk: !!membership,
+        activeCount: actives.filter((j) => inSet.has(j)).length,
+        partialCount: partials.filter((j) => inSet.has(j)).length
+    };
+}
+
 function formatEta(ms) {
     const s = Math.ceil(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -123,4 +180,4 @@ function estimateTotal(count, cfg) {
     return Math.round(count * avg);
 }
 
-module.exports = { runSafeBroadcast, isBroadcastRunning, estimateTotal, formatEta, getDelays };
+module.exports = { runSafeBroadcast, isBroadcastRunning, estimateTotal, formatEta, getDelays, resolveBroadcastTargets };

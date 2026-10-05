@@ -1,12 +1,10 @@
 // spawnSafe.js — suprime janelas pretas (conhost.exe) no Windows.
 // No Windows, todo spawn SEM windowsHide abre uma janela de console que
 // pisca na tela. Isso cobre:
-//  - fluent-ffmpeg (stickers, conversões, TTS): não tem opção pública de
-//    windowsHide, então o patch global abaixo é o único jeito sem reescrever
-//    as ~13 chamadas;
+//  - wrapper interno src/services/ffmpeg (stickers, conversões, TTS);
 //  - backstop para qualquer spawn direto que esqueça a flag.
 // Uso: chamar patchChildProcess() UMA vez no startup (index.js), antes de
-// qualquer require('fluent-ffmpeg'). Respeita windowsHide:false explícito.
+// qualquer spawn. Respeita windowsHide:false explícito.
 
 const childProcess = require('child_process');
 

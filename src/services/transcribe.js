@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const ffmpeg = require('fluent-ffmpeg');
+const ffmpeg = require('./ffmpeg');
 
 const { withTimeout } = require('./timeout');
 

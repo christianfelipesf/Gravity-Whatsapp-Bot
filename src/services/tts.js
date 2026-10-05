@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const ffmpeg = require('fluent-ffmpeg');
+const ffmpeg = require('./ffmpeg');
 
 const piperDir = path.join(process.cwd(), 'bin', 'piper');
 const isWindows = process.platform === 'win32';

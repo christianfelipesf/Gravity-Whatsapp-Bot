@@ -1,8 +1,8 @@
 require('dotenv').config();
 
 // Suprime janelas de console (conhost) no Windows para ffmpeg/python/etc.
-// ANTES de qualquer require('fluent-ffmpeg') — o patch pega o módulo
-// child_process cacheado, cobrindo o fluent-ffmpeg (stickers/conversões).
+// ANTES de qualquer spawn — o patch pega o módulo child_process cacheado,
+// cobrindo o wrapper interno src/services/ffmpeg (stickers/conversões).
 try { require('./src/services/spawnSafe').patchChildProcess(); } catch (_) {}
 
 const { 
@@ -11,10 +11,10 @@ const {
     DisconnectReason
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const fs = require('fs');
 const { Boom } = require('@hapi/boom');
-const ffmpeg = require('fluent-ffmpeg');
+const ffmpeg = require('./src/services/ffmpeg');
 const { execFileSync } = require('child_process');
 let _ffmpegChecked = false;
 let _ffmpegFound = false;
@@ -313,11 +313,15 @@ async function startBot() {
         let _reconnectSafetyTimer = setTimeout(() => { if (_reconnecting) { console.warn('⚠️ [watchdog] _reconnecting travado >30s — liberando'); _reconnecting = false; } }, 30000);
         if (_reconnectSafetyTimer.unref) _reconnectSafetyTimer.unref();
 
-        sock.ev.on('connection.update', (u) => {
+        sock.ev.on('connection.update', async (u) => {
             if (u.qr) {
                 _qrAttempts++;
                 console.log(`\n⚡ --- QR CODE #${_qrAttempts}/${MAX_QR_ATTEMPTS} (attemptId=${_restartNumber}-${_qrAttempts}) --- ⚡`);
-                qrcode.generate(u.qr, { small: true });
+                try {
+                    console.log(await QRCode.toString(u.qr, { type: 'terminal', small: true }));
+                } catch (e) {
+                    console.log(u.qr);
+                }
                 try { dashboard.setConnectionState({ status: 'qr', qr: u.qr, phone: null }); } catch (_) {}
                 try { require('./src/services/principalState').setQr(u.qr); } catch (_) {}
                 try { telegram.notifyQr({ botName: config.botName, attempt: _qrAttempts }).catch(()=>{}); } catch (_) {}

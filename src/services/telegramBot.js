@@ -108,14 +108,20 @@ async function fanOutBroadcast(chatId, makePayload, label) {
     const utils = require('../database/utils');
     const safe = require('./safeBroadcast');
     const cfg = utils.readConfig();
-    const groups = utils.listActiveGroups().filter(j => j.endsWith('@g.us'));
-    if (!groups.length) { await send(chatId, `⚠️ Nenhum grupo ativo`); return; }
     const sock = global.__baileysSock;
     if (!sock) { await send(chatId, `❌ Baileys desconectado`); return; }
+    // Alvos reais: bot dentro + ativo ou parcial (mortos são podados do banco).
+    const targets = await safe.resolveBroadcastTargets(sock);
+    const groups = targets.groups;
+    if (targets.pruned.length) {
+        try { await send(chatId, `🧹 ${targets.pruned.length} grupo(s) morto(s) removido(s) da lista (bot fora): ${targets.pruned.map((j) => `\`${j.split('@')[0].slice(-6)}\``).join(' ')}`); } catch (_) {}
+    }
+    if (!groups.length) { await send(chatId, `⚠️ Nenhum grupo válido (bot dentro + ativo/parcial)`); return; }
     if (safe.isBroadcastRunning()) { await send(chatId, `⏳ Já existe um broadcast em andamento. Aguarde terminar.`); return; }
+    const detail = `${groups.length} grupos (${targets.activeCount} ativos + ${targets.partialCount} parciais)${targets.membershipOk ? '' : ' — ⚠️ sem checagem de presença (lista do banco)'}`;
     const eta = safe.estimateTotal(groups.length, cfg);
     await send(chatId,
-        `📢 Broadcast ${label || ''}para *${groups.length} grupos*\n` +
+        `📢 Broadcast ${label || ''}para *${detail}*\n` +
         `⏱️ Tempo estimado: ~${safe.formatEta(eta)} (delay ${Math.round((cfg.broadcastMinDelayMs||30000)/1000)}–${Math.round((cfg.broadcastMaxDelayMs||60000)/1000)}s/grupo)\n` +
         `⚠️ O WhatsApp bane por spam: envio idêntico e rápido = ban temporário.\n` +
         `O bot vai enviar devagar, um por vez, e parar sozinho em rate-limit.`);
@@ -173,11 +179,13 @@ async function handleUpdate(update) {
             const utils = require('../database/utils');
             const safe = require('./safeBroadcast');
             const cfg = utils.readConfig();
-            const n = utils.listActiveGroups().filter(j => j.endsWith('@g.us')).length;
+            const targets = await safe.resolveBroadcastTargets(global.__baileysSock);
+            const n = targets.groups.length;
             _pendingBroadcast.set(String(chatId), { kind: 'image', text: legenda, imgBuf: dl.buffer, expiresAt: Date.now() + BROADCAST_CONFIRM_MS });
             await send(chatId,
                 `⚠️ *CONFIRMAR BROADCAST COM IMAGEM*\n` +
-                `📢 ${n} grupo(s) • ~${safe.formatEta(safe.estimateTotal(n, cfg))}\n` +
+                `📢 ${n} grupo(s) válido(s) (${targets.activeCount} ativos + ${targets.partialCount} parciais) • ~${safe.formatEta(safe.estimateTotal(n, cfg))}\n` +
+                (targets.pruned.length ? `🧹 ${targets.pruned.length} morto(s) podado(s)\n` : ``) +
                 `❗ Envio em massa pode gerar *ban temporário*.\n` +
                 `Confirme com foto+legenda \`/broadcast confirmar\` (5 min).`);
         } catch (e) { await send(chatId, `❌ Erro: ${e.message}`); }
@@ -363,12 +371,14 @@ async function handleUpdate(update) {
             const utils = require('../database/utils');
             const safe = require('./safeBroadcast');
             const cfg = utils.readConfig();
-            const n = utils.listActiveGroups().filter(j => j.endsWith('@g.us')).length;
-            if (!n) { await send(chatId, `⚠️ Nenhum grupo ativo`); return; }
+            const targets = await safe.resolveBroadcastTargets(global.__baileysSock);
+            const n = targets.groups.length;
+            if (!n) { await send(chatId, `⚠️ Nenhum grupo válido (bot dentro + ativo/parcial)`); return; }
             _pendingBroadcast.set(String(chatId), { kind: 'text', text: broadcastText, expiresAt: Date.now() + BROADCAST_CONFIRM_MS });
             await send(chatId,
                 `⚠️ *CONFIRMAR BROADCAST*\n` +
-                `📢 ${n} grupo(s) • ~${safe.formatEta(safe.estimateTotal(n, cfg))} (devagar p/ evitar ban)\n` +
+                `📢 ${n} grupo(s) válido(s) (${targets.activeCount} ativos + ${targets.partialCount} parciais) • ~${safe.formatEta(safe.estimateTotal(n, cfg))} (devagar p/ evitar ban)\n` +
+                (targets.pruned.length ? `🧹 ${targets.pruned.length} morto(s) podado(s)\n` : ``) +
                 `📝 \`${broadcastText.slice(0, 200)}\`\n\n` +
                 `❗ Envio em massa idêntico é o que causa *ban temporário*.\n` +
                 `Confirme com \`/broadcast confirmar\` (5 min) ou aguarde expirar.`);

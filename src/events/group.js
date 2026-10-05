@@ -1,4 +1,4 @@
-const { isDashboardEnabled, getDashboardGroupInfo, upsertDashboardGroupInfo, groupMetadataCached, clearGroupMetadataCache, isBlacklisted, isBlacklistedAny, botIsAdmin, recordModEvent, getGroupData, getThemeForJid } = require('../database/utils');
+const { isDashboardEnabled, getDashboardGroupInfo, upsertDashboardGroupInfo, groupMetadataCached, clearGroupMetadataCache, isBlacklisted, isBlacklistedAny, botIsAdmin, recordModEvent, getGroupData, getThemeForJid, normalizeJid, deactivateGroup } = require('../database/utils');
 const identity = require('../services/identity');
 const { getTheme } = require('../services/themes');
 const { generateWelcomeImage, getUserAvatarBuffer, getGroupAvatarBuffer, resolveDisplayJid, displayNameForEvent } = require('../services/welcomeImage');
@@ -59,6 +59,33 @@ function markWelcomeSent(jid) {
     try { _loadWelcomeState(); } catch (_) {}
     _welcomeLast.set(jid, Date.now());
     try { _saveWelcomeState(); } catch (_) {}
+}
+
+/**
+ * O próprio bot saiu/foi removido do grupo? Compara JID normalizado +
+ * dígitos (o evento pode trazer @s.whatsapp.net e o sock ter outro
+ * formato). Pura/testável — ver test/services/broadcast-targets.test.js.
+ */
+function isBotRemoved(anu, botId) {
+    try {
+        if (!anu || anu.action !== 'remove' || !Array.isArray(anu.participants) || !anu.participants.length) return false;
+        if (!botId) return false;
+        let meNorm = null;
+        let meDigits = null;
+        try { meNorm = normalizeJid(botId); } catch (_) {}
+        try { meDigits = String(botId).split('@')[0].split(':')[0].replace(/\D/g, '') || null; } catch (_) {}
+        if (!meNorm && !meDigits) return false;
+        return anu.participants.some((p) => {
+            try {
+                if (meNorm && normalizeJid(p) === meNorm) return true;
+                if (meDigits) {
+                    const d = String(p).split('@')[0].split(':')[0].replace(/\D/g, '');
+                    if (d && d === meDigits) return true;
+                }
+            } catch (_) {}
+            return false;
+        });
+    } catch (_) { return false; }
 }
 
 function snapshotGroup(jid, meta) {
@@ -173,6 +200,18 @@ module.exports = {
         // Invalida cache ANTES de qualquer early-return: mudança de participantes
         // afeta getAdmins/enforcement, não só o dashboard.
         try { clearGroupMetadataCache(anu.id); } catch (_) {}
+
+        // O próprio bot saiu/foi removido/banido: desliga na hora (total+parcial).
+        // Sem isso a linha apodrecia em active_groups e o /broadcast contava
+        // grupo morto (só gerava falha no envio).
+        try {
+            const botId = sock?.user?.id || sock?.user?.jid || '';
+            if (isBotRemoved(anu, botId)) {
+                try { deactivateGroup(anu.id); } catch (_) {}
+                try { console.log(`👋 [groups] bot saiu/foi removido de ${anu.id} — desativado (total+parcial)`); } catch (_) {}
+                return;
+            }
+        } catch (_) {}
 
         // === Analytics !infogrupo: entradas/saídas (últimos 90 dias) ===
         try {
@@ -485,5 +524,6 @@ module.exports = {
     // Exportados p/ !bemvindo ver/status e testes.
     getWelcomeRemainingMs,
     markWelcomeSent,
+    isBotRemoved,
     WELCOME_COOLDOWN_MS
 };
