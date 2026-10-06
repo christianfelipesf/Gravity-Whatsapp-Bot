@@ -5,6 +5,23 @@ require('dotenv').config();
 // cobrindo o wrapper interno src/services/ffmpeg (stickers/conversões).
 try { require('./src/services/spawnSafe').patchChildProcess(); } catch (_) {}
 
+// Instância única ANTES de qualquer socket/Telegram: dois processos no mesmo
+// número geram close 440 (connectionReplaced) em loop — a "sessão fantasma".
+// Se já houver uma instância viva, aborta aqui e o pm2 não duplica conexão.
+try {
+    const si = require('./src/services/singleInstance');
+    const lock = si.acquire();
+    if (!lock.ok) {
+        console.error(`⛔ [singleInstance] outra instância já está ativa (pid=${lock.holder?.pid} pm2=${lock.holder?.pm2 ?? false}) — abortando para evitar sessão fantasma/440.`);
+        process.exit(0);
+    }
+    if (lock.degraded) {
+        console.warn(`⚠️ [singleInstance] lock indisponível (${lock.error?.message || lock.error}) — seguindo sem proteção`);
+    }
+} catch (e) {
+    console.warn(`⚠️ [singleInstance] falha ao aplicar lock: ${e.message} — seguindo`);
+}
+
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
@@ -222,6 +239,7 @@ let _qrAttempts = 0;
 const MAX_QR_ATTEMPTS = 3;
 let _reconnecting = false;
 let _reconnectBackoffMs = 5000;
+let _lastCloseCode = null;
 const RECONNECT_BACKOFF_MAX = 60000;
 global.__qrControl = {
     getAttempts: () => _qrAttempts,
@@ -344,6 +362,7 @@ async function startBot() {
                     ? lastErr.output?.statusCode
                     : lastErr?.statusCode || lastErr?.output?.statusCode;
                 const reasonName = (() => { try { if (DisconnectReason[code]) return String(DisconnectReason[code]); for (const [k,v] of Object.entries(DisconnectReason)) if (v===code) return k; } catch(_){} return 'unknown'; })();
+                _lastCloseCode = code;
                 const boomMsg = lastErr?.message || lastErr?.output?.payload?.message || '';
                 const stack0 = (lastErr?.stack||'').split('\n')[1]?.trim()||'';
                 console.warn(`🔌 [CONNECTION] close code=${code ?? '?'} reason=${reasonName} boom=${!!(lastErr instanceof Boom)} msg="${String(boomMsg).slice(0,150)}" stack0="${stack0}" attemptId=${_restartNumber}-${_qrAttempts} isBoom=${!!lastErr?.isBoom}`);
@@ -356,6 +375,13 @@ async function startBot() {
                     return;
                 }
                 if (code !== DisconnectReason.loggedOut) {
+                    // 440 connectionReplaced: outro socket com as MESMAS credenciais
+                    // assumiu (sessão fantasma). Reconectar em rajada faz os dois se
+                    // derrubarem em loop — por isso exige backoff longo.
+                    if (code === DisconnectReason.connectionReplaced) {
+                        _reconnectBackoffMs = Math.max(_reconnectBackoffMs, RECONNECT_BACKOFF_MAX);
+                        console.warn('🔁 [CONNECTION] 440 connectionReplaced — possível instância duplicada; backoff longo para quebrar o ping-pong');
+                    }
                     const wait = _reconnectBackoffMs;
                     _reconnectBackoffMs = Math.min(RECONNECT_BACKOFF_MAX, _reconnectBackoffMs * 2);
                     // Jitter ±25%: evita rajada sincronizada principal+subs no mesmo IP.
@@ -383,7 +409,9 @@ async function startBot() {
                 }
             } else if (u.connection === 'open') {
                 _reconnecting = false;
-                _reconnectBackoffMs = 5000;
+                // Só zera o backoff em conexão limpa; se o último close foi 440,
+                // mantém o backoff longo (evita ping-pong com instância duplicada).
+                if (_lastCloseCode !== DisconnectReason.connectionReplaced) _reconnectBackoffMs = 5000;
                 try { clearTimeout(_reconnectSafetyTimer); } catch (_) {}
                 _qrAttempts = 0;
                 _connAttemptId++;
