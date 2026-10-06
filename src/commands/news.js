@@ -39,11 +39,63 @@ module.exports = {
         const { react, setNewsEnabled, isNewsEnabled, listNewsGroups, readConfig, normalizeJid, getAdmins, isUserAdmin, canAdminControl, canActivateBotAsync, canConfigureBot, canGuardianActAsync } = utils;
 
         if (!isGroup) {
+            const _sub0 = (fullArgsText || '').trim().split(/ +/)[0].toLowerCase();
+            // Desliga o feed em TODOS os grupos de uma vez (só dono; funciona
+            // no PV). O poll seguinte já volta a ficar quieto (lista vazia).
+            if (_sub0 === 'desativar-todos' || _sub0 === 'desativar-tudo' || _sub0 === 'todos-off' || _sub0 === 'all-off') {
+                const meId = normalizeJid(sock.user.id);
+                const senderNorm = normalizeJid(sender);
+                let allowed = m.key.fromMe === true || sender === meId || senderNorm === meId;
+                // Sub-dono também pode (dono real ou sub-dono).
+                if (!allowed) {
+                    try { if (typeof canConfigureBot === 'function' && canConfigureBot(sock, m, sender, from).ok) allowed = true; } catch (_) {}
+                }
+                if (!allowed) {
+                    await sock.sendMessage(from, { text: '❌ Apenas o dono e sub-donos podem desativar o feed em todos os grupos.' }, { quoted: m });
+                    return await react(sock, m, '❌', lastBotResponse, GLOBAL_COOLDOWN);
+                }
+                const all = listNewsGroups();
+                if (all.length === 0) {
+                    await sock.sendMessage(from, { text: '📴 O feed já está desativado em todos os grupos.' }, { quoted: m });
+                    return await react(sock, m, '📴', lastBotResponse, GLOBAL_COOLDOWN);
+                }
+                let off = 0;
+                for (const jid of all) {
+                    try { if (setNewsEnabled(jid, false)) off++; } catch (_) {}
+                }
+                await sock.sendMessage(from, { text: `📴 *Feed desativado em ${off} grupo(s).* O terminal volta a ficar quieto no próximo ciclo.` }, { quoted: m });
+                return await react(sock, m, '🔴', lastBotResponse, GLOBAL_COOLDOWN);
+            }
             await sock.sendMessage(from, { text: '❌ Este comando só funciona em grupos.' }, { quoted: m });
             return await react(sock, m, '❌', lastBotResponse, GLOBAL_COOLDOWN);
         }
 
         const sub = (fullArgsText || '').trim().split(/ +/)[0].toLowerCase();
+
+        if (sub === 'desativar-todos' || sub === 'desativar-tudo' || sub === 'todos-off' || sub === 'all-off') {
+            const meId0 = normalizeJid(sock.user.id);
+            const senderNorm0 = normalizeJid(sender);
+            let allowed0 = m.key.fromMe === true || sender === meId0 || senderNorm0 === meId0;
+            // Sub-dono também pode (dono real ou sub-dono).
+            if (!allowed0) {
+                try { if (typeof canConfigureBot === 'function' && canConfigureBot(sock, m, sender, from).ok) allowed0 = true; } catch (_) {}
+            }
+            if (!allowed0) {
+                await sock.sendMessage(from, { text: '❌ Apenas o dono e sub-donos podem desativar o feed em todos os grupos.' }, { quoted: m });
+                return await react(sock, m, '❌', lastBotResponse, GLOBAL_COOLDOWN);
+            }
+            const all0 = listNewsGroups();
+            if (all0.length === 0) {
+                await sock.sendMessage(from, { text: '📴 O feed já está desativado em todos os grupos.' }, { quoted: m });
+                return await react(sock, m, '📴', lastBotResponse, GLOBAL_COOLDOWN);
+            }
+            let off0 = 0;
+            for (const jid of all0) {
+                try { if (setNewsEnabled(jid, false)) off0++; } catch (_) {}
+            }
+            await sock.sendMessage(from, { text: `📴 *Feed desativado em ${off0} grupo(s).*` }, { quoted: m });
+            return await react(sock, m, '🔴', lastBotResponse, GLOBAL_COOLDOWN);
+        }
 
         if (sub === 'ativar' || sub === 'on' || sub === 'ligar') {
             const meId = normalizeJid(sock.user.id);
@@ -141,7 +193,7 @@ module.exports = {
         const enabled = isNewsEnabled(from);
 
         await sock.sendMessage(from, {
-            text: `📰 *Feed de Notícias*\n\n📡 Estado: ${enabled ? '🟢 Ativado' : '🔴 Desativado'}\n\nComandos:\n│ 🟢 *${config.prefix}news ativar*\n│ 🔴 *${config.prefix}news desativar*\n│ ℹ️ *${config.prefix}news status*\n\nNovos posts são publicados automaticamente no grupo, com imagem(ns), vídeo e legenda.`
+            text: `📰 *Feed de Notícias*\n\n📡 Estado: ${enabled ? '🟢 Ativado' : '🔴 Desativado'}\n\nComandos:\n│ 🟢 *${config.prefix}news ativar*\n│ 🔴 *${config.prefix}news desativar*\n│ 🔴 *${config.prefix}news desativar-todos* (dono, todos os grupos)\n│ ℹ️ *${config.prefix}news status*\n\nNovos posts são publicados automaticamente no grupo, com imagem(ns), vídeo e legenda.`
         }, { quoted: m });
         return await react(sock, m, '📰', lastBotResponse, GLOBAL_COOLDOWN);
     }

@@ -1041,6 +1041,69 @@ function deactivateGroup(jid) {
     return true;
 }
 
+// ============================================================
+// Purga total de grupo MORTO (bot fora: saiu/removido/banido).
+// Diferente do deactivateGroup (que preserva rank e histórico de
+// propósito), aqui some TUDO: ativação, news, dashboard, group_state
+// (inclui shell de rank), logs, mensagens, stats, modlog, blacklist.
+// O delete de messages passa por clearChatHistory para propagar à nuvem
+// (senão o PULL do boot ressuscita o histórico apagado).
+// Retorna { ok, jid, removed } com contagens por tabela.
+// ============================================================
+const _purgeMsgStats = db.prepare('DELETE FROM group_msg_stats WHERE jid = ?');
+const _purgeModlog = db.prepare('DELETE FROM group_modlog WHERE jid = ?');
+const _purgeRankHist = db.prepare('DELETE FROM rank_monthly_history WHERE jid = ?');
+const _purgeBlacklist = db.prepare('DELETE FROM group_blacklist WHERE group_jid = ?');
+const _purgeMemeSends = db.prepare('DELETE FROM meme_sends WHERE group_jid = ?');
+const _purgeFeedback = db.prepare('DELETE FROM feedback WHERE group_jid = ?');
+
+function purgeDeadGroup(jid) {
+    if (!jid || !String(jid).endsWith('@g.us')) return { ok: false, error: 'jid inválido' };
+    const removed = {};
+    const tally = (k, fn) => { try { removed[k] = Number(fn()) || 0; } catch (_) { removed[k] = 0; } };
+    try { deactivateGroup(jid); removed.ativacao = 1; } catch (_) { removed.ativacao = 0; }
+    // deactivateGroup recria shell de rank em group_state — purga apaga de vez.
+    tally('group_state', () => _gsDelete.run(jid).changes);
+    try { if (setNewsEnabled(jid, false)) removed.news = 1; } catch (_) { removed.news = 0; }
+    try { if (setDashboardEnabled(jid, false)) removed.dashboard = 1; } catch (_) { removed.dashboard = 0; }
+    tally('dashboard_info', () => _dgiDelete.run(jid).changes);
+    tally('dashboard_logs', () => _dlDeleteByJid.run(jid).changes);
+    try { clearChatHistory(jid); removed.messages = 1; } catch (_) { removed.messages = 0; }
+    tally('msg_stats', () => _purgeMsgStats.run(jid).changes);
+    tally('modlog', () => _purgeModlog.run(jid).changes);
+    tally('rank_hist', () => _purgeRankHist.run(jid).changes);
+    tally('blacklist', () => _purgeBlacklist.run(jid).changes);
+    tally('meme_sends', () => _purgeMemeSends.run(jid).changes);
+    tally('feedback', () => _purgeFeedback.run(jid).changes);
+    try { checkpointWal(); } catch (_) {}
+    // Tabelas de histórico com sync upsert-only (sem REPLACE): sem o DELETE
+    // explícito na nuvem, o PULL do próximo boot (MERGE, não wipe) ressuscita
+    // os logs do grupo morto. Fire-and-forget como o delete de messages.
+    try { _attemptCloudPurgeDeletes(jid); } catch (_) {}
+    return { ok: true, jid, removed };
+}
+
+// DELETEs na nuvem p/ tabelas que o push normal nunca apaga (upsert-only).
+// Best-effort: falha de rede só loga (o trim de cap da nuvem apaga com o tempo).
+function _attemptCloudPurgeDeletes(jid) {
+    try {
+        const { supaFetch, isSupabaseEnabled } = require('./supabaseClient');
+        if (!isSupabaseEnabled || !isSupabaseEnabled()) return;
+        const targets = [
+            `/dashboard_logs?to_jid=eq.${encodeURIComponent(jid)}`,
+            `/group_msg_stats?jid=eq.${encodeURIComponent(jid)}`,
+            `/group_modlog?jid=eq.${encodeURIComponent(jid)}`
+        ];
+        for (const p of targets) {
+            try {
+                supaFetch(p, { method: 'DELETE', timeoutMs: 15000 }).catch((e) => {
+                    try { console.error('⚠️ [purga] delete na nuvem falhou (segue local):', e?.message || e); } catch (_) {}
+                });
+            } catch (_) {}
+        }
+    } catch (_) {}
+}
+
 const _agList = db.prepare('SELECT jid FROM active_groups');
 function listActiveGroups() {
     try { return _agList.all().map(r => r.jid); } catch (e) { return []; }
@@ -1278,9 +1341,17 @@ function _rowToLog(row) {
 function insertDashboardLog(data) {
     if (!data) return false;
     try {
+        // Trava anti-base64: data: URL grande nunca entra no banco (foi o que
+        // inflou o bot.db em ~47MB com notas de voz). Vale p/ todo escritor.
+        let media = data.media || null;
+        try {
+            if (media && typeof media.url === 'string' && media.url.startsWith('data:') && media.url.length > 64 * 1024) {
+                media = { type: media.type || 'chat', url: null, sizeBytes: media.sizeBytes || media.url.length };
+            }
+        } catch (_) {}
         const r = _dlInsert.run(String(data.type || 'chat'), data.group || data.grp || null,
             data.text == null ? null : String(data.text), data.name || null, data.phone || null,
-            data.media ? JSON.stringify(data.media) : null, data.toJid || data.to_jid || null,
+            media ? JSON.stringify(media) : null, data.toJid || data.to_jid || null,
             data.messageId || data.message_id || null, data.senderJid || data.sender_jid || null,
             data.fromMe ? 1 : 0, data.hidden ? 1 : 0, data.ephemeral ? 1 : 0,
             data.quoted ? JSON.stringify(data.quoted) : null, data.reactions ? JSON.stringify(data.reactions) : null,
@@ -1540,7 +1611,16 @@ function updateDashboardLogReactions(toJid, messageId, type, reactions) {
 
 function updateDashboardLogMedia(toJid, messageId, type, mediaJson) {
     if (!toJid || !messageId) return false;
-    try { return _dlUpdateMedia.run(mediaJson, toJid, messageId, type || 'chat').changes > 0; } catch (e) { return false; }
+    try {
+        // Trava anti-base64 (nível string): mesmo que um data: URL chegue até
+        // aqui, ele é trocado por referência nula antes do UPDATE.
+        if (typeof mediaJson === 'string' && mediaJson.length > 64 * 1024 && mediaJson.includes(';base64,')) {
+            let t = type || 'chat';
+            try { t = JSON.parse(mediaJson).type || t; } catch (_) {}
+            mediaJson = JSON.stringify({ type: t, url: null });
+        }
+        return _dlUpdateMedia.run(mediaJson, toJid, messageId, type || 'chat').changes > 0;
+    } catch (e) { return false; }
 }
 
 function selectDashboardLogsWithInlineMedia(limit = 500) {
@@ -2925,8 +3005,8 @@ migrateLegacyActiveGroups();
 migrateJsonToSqlite();
 
 // Backup automático do banco (online, via SQLite backup API) — a cada 6h, mantém os
-// últimos 4 arquivos (~1 dia). Pasta backups/ é local e ignorada pelo git.
-const DB_BACKUP_KEEP = 4;
+// últimos 3 arquivos. Pasta backups/ é local e ignorada pelo git.
+const DB_BACKUP_KEEP = 3;
 function backupDatabase() {
     try {
         flushNow();
@@ -3050,7 +3130,7 @@ process.on('SIGTERM', () => { void flushAndPushBeforeExit(0); });
 module.exports = {
     isConnectionClosedError,
     readConfig, writeConfig, readStats, incrementRestart, incrementCommand,
-    isActiveGroup, activateGroup, deactivateGroup, listActiveGroups,
+    isActiveGroup, activateGroup, deactivateGroup, listActiveGroups, purgeDeadGroup,
     isPartialActive, activatePartial, deactivatePartial, listPartialGroups,
     shouldRecordHistory,
     reconcileActivePartial,

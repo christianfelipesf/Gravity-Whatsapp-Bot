@@ -141,6 +141,11 @@ try { require('./src/services/dailyDump').startDailyDump(); } catch (e) {
     console.error('⚠️ [dailyDump] falha ao agendar (bot segue normal):', e.message);
 }
 
+// Lembrete semanal de limpeza no Telegram (1x/semana, só se houver mortos)
+try { require('./src/services/weeklyPurgeNag').startWeeklyPurgeNag(); } catch (e) {
+    console.error('⚠️ [purgeNag] falha ao agendar (bot segue normal):', e.message);
+}
+
 // Restaurar sub-sessões Baileys persistidas SOMENTE depois do principal 🟢.
 // Antes elas subiam em paralelo ao principal e causavam 428/515/401 (conflito Baileys).
 const _restorePromise = Promise.resolve();

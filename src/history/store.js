@@ -99,10 +99,14 @@ function persistReceivedMedia(media, messageId) {
     const type = media.type;
     if (!['image', 'video', 'audio', 'voice', 'sticker', 'document'].includes(type)) return null;
     if (media.url && media.url.startsWith('data:') && messageId) {
-        const m = /^data:([^;]+);base64,(.+)$/.exec(media.url);
+        // Mime pode vir com parâmetros (ex.: "audio/ogg; codecs=opus" das
+        // notas de voz) — o ([^;]+) antigo não casava e o base64 inteiro
+        // (até ~780KB) caía no media_json do banco. Casa até ";base64," e
+        // sanitiza o mime (corta nos parâmetros).
+        const m = /^data:([^,]+?);base64,(.+)$/s.exec(media.url);
         if (m) {
             try {
-                const mime = m[1];
+                const mime = String(m[1]).split(';')[0].trim() || 'application/octet-stream';
                 const buf = Buffer.from(m[2], 'base64');
                 try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (_) {}
                 try { fs.writeFileSync(path.join(MEDIA_DIR, encodeURIComponent(messageId)), buf); } catch (_) {}
@@ -115,6 +119,14 @@ function persistReceivedMedia(media, messageId) {
                 };
             } catch (_) {}
         }
+        // Falhou extrair/persistir: NÃO devolve o data: URL (iria parar no
+        // banco e inflar o bot.db). Devolve referência nula + tamanho.
+        return { type, url: null, sizeBytes: media.sizeBytes || 0 };
+    }
+    // Sem messageId não há como persistir em disco — mas data: gigante
+    // também não pode vazar para o chamador (mesmo motivo acima).
+    if (media.url && media.url.startsWith('data:') && media.url.length > 64 * 1024) {
+        return { type, url: null, sizeBytes: media.sizeBytes || 0 };
     }
     return media;
 }

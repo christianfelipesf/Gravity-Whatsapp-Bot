@@ -65,6 +65,7 @@ module.exports = {
             `╰───────────────\n\n` +
             `╭─── *FEED / NEWS* ───\n` +
             `│ 📰 *${p}news* — ativa/desativa no grupo\n` +
+            `│ 📰 *${p}news desativar-todos* — desliga em todos (dono)\n` +
             `│ 📰 *${p}newsativar* / *${p}newsdesativar* — global\n` +
             `│ 🗑️ *${p}newsreset* — reseta posts vistos\n` +
             `╰───────────────\n\n` +
@@ -74,6 +75,7 @@ module.exports = {
             `│ 📄 *${p}log* — envia logs do terminal\n` +
             `│ 🔧 *${p}setprefix* <prefix> / *${p}set* — configs\n` +
             `│ 📦 *${p}dump* / *${p}grupos* — diagnóstico\n` +
+            `│ 🧹 *${p}limparmortos* / *${p}limparmortos confirmar* — purga grupos que o bot saiu\n` +
             `╰───────────────\n\n` +
             `╭─── *ANTI-BAN* ───\n` +
             `│ 🤖 *${p}humanizar* on/off/status — modo humano (só dono, salvo no banco)\n` +

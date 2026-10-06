@@ -346,6 +346,37 @@ try {
     console.error('[database] limpeza de órffãos falhou:', e?.message || e);
 }
 
+// Limpeza one-shot de mídia inline em base64 no media_json (bug do regex de
+// persistReceivedMedia com "audio/ogg; codecs=opus": ~1,5k notas de voz com
+// até 780KB cada = ~47MB no bot.db). Troca por referência nula preservando
+// o type; texto/autor/data intactos. Idempotente via flag em config.
+try {
+    const flagRow = db.prepare("SELECT value FROM config WHERE key = 'inline_media_cleanup_v1'").get();
+    if (!flagRow || flagRow.value !== '1') {
+        let changed = 0;
+        try {
+            const res = db.prepare(
+                `UPDATE dashboard_logs SET media_json = '{"type":"' || COALESCE(json_extract(media_json, '$.type'), 'chat') || '","url":null}' WHERE media_json LIKE '%data:%'`
+            ).run();
+            changed = Number(res?.changes) || 0;
+        } catch (_) {
+            // Sem JSON1: cobre o caso real (áudios) com literal.
+            try {
+                const res = db.prepare(`UPDATE dashboard_logs SET media_json = '{"type":"audio","url":null}' WHERE media_json LIKE '%data:audio%'`).run();
+                changed = Number(res?.changes) || 0;
+            } catch (_) {}
+        }
+        db.prepare("INSERT INTO config (key, value) VALUES ('inline_media_cleanup_v1', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
+        if (changed > 0) {
+            console.log(`🧹 [database] limpou ${changed} mídia(s) inline em base64 do histórico (espaço liberado p/ reuso)`);
+            try { db.pragma('incremental_vacuum(2000)'); } catch (_) {}
+            try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
+        }
+    }
+} catch (e) {
+    console.error('[database] limpeza de mídia inline falhou:', e?.message || e);
+}
+
 function checkpointWal() {
     try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {}
 }

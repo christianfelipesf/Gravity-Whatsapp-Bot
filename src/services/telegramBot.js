@@ -41,6 +41,18 @@ async function send(chatId, text, opts = {}) {
             ...opts.extra
         };
         if (opts.parseMode !== null) payload.parse_mode = opts.parseMode || 'Markdown';
+        // Botões inline (opts.buttons: [[{text, data}, ...], ...]).
+        // callback_data limitado a 64 bytes pela Bot API.
+        if (opts.buttons) {
+            try {
+                const rows = (Array.isArray(opts.buttons) ? opts.buttons : []).map((row) =>
+                    (Array.isArray(row) ? row : [row])
+                        .map((b) => ({ text: String(b?.text || '').slice(0, 60), callback_data: String(b?.data || '').slice(0, 64) }))
+                        .filter((b) => b.text && b.callback_data)
+                ).filter((r) => r.length);
+                if (rows.length) payload.reply_markup = { inline_keyboard: rows.slice(0, 20) };
+            } catch (_) {}
+        }
         const res = await api.post('/sendMessage', payload);
         return { ok: !!res.data?.ok };
     } catch (e) {
@@ -77,6 +89,23 @@ function isAuthorized(chatId) {
     return String(chatId) === String(allowed);
 }
 
+// Responde ao clique num botão inline (tira a ampulheta do botão).
+async function answerCallback(id, text) {
+    const api = _getApi();
+    if (!api || !id) return { ok: false, error: 'no-api-or-id' };
+    try {
+        const payload = { callback_query_id: id };
+        if (text) {
+            payload.text = String(text).slice(0, 200);
+            payload.show_alert = true;
+        }
+        await api.post('/answerCallbackQuery', payload);
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
 async function downloadTelegramFile(fileId) {
     const api = _getApi();
     if (!api) return { ok: false, error: 'not_configured' };
@@ -103,6 +132,10 @@ async function downloadTelegramFile(fileId) {
 // contagem + ETA e pede /broadcast confirmar; 2ª executa com delay seguro.
 const _pendingBroadcast = new Map(); // chatId -> { kind:'text'|'image', text, imgBuf, expiresAt }
 const BROADCAST_CONFIRM_MS = 5 * 60 * 1000;
+
+// Pendência do /limparmortos confirmar (uma por vez, expira em 5 min).
+let _pendingPurge = null;
+const PURGE_CONFIRM_MS = 5 * 60 * 1000;
 
 async function fanOutBroadcast(chatId, makePayload, label) {
     const utils = require('../database/utils');
@@ -142,6 +175,22 @@ async function fanOutBroadcast(chatId, makePayload, label) {
 }
 
 async function handleUpdate(update) {
+    // Clique em botão inline: equivale a digitar o comando (data "cmd:/status").
+    // Reaproveita o roteador de texto via mensagem sintética (profundidade 1).
+    if (update.callback_query) {
+        const cq = update.callback_query;
+        const cqChatId = cq.message?.chat?.id;
+        try { await answerCallback(cq.id); } catch (_) {}
+        if (!cqChatId || !isAuthorized(cqChatId)) return;
+        const data = String(cq.data || '');
+        if (!data.startsWith('cmd:')) return;
+        const fakeText = data.slice(4).trim();
+        if (!fakeText) return;
+        return handleUpdate({
+            message: { chat: { id: cqChatId }, text: fakeText, from: cq.from, message_id: cq.message?.message_id },
+            update_id: update.update_id
+        });
+    }
     const msg = update.message || update.edited_message;
     if (!msg) return;
     const chatId = msg.chat?.id;
@@ -198,28 +247,28 @@ async function handleUpdate(update) {
     const lower = text.toLowerCase();
     const args = text.split(/\s+/).slice(1);
 
-    // /help /start
+    // /help /start — menu clicável (botões equivalem a digitar o comando)
     if (lower === '/start' || lower === '/help' || lower.startsWith('/help ')) {
         const help = [
-            `*🤖 Gravity Bot — Comandos Telegram*`,
+            `*🤖 Gravity Bot — Painel Telegram*`,
             ``,
-            `/status — saúde do bot (ws, zumbi, grupos, uptime, banco)`,
-            `/modo — mostra banco atual (local x nuvem)`,
-            `/banco <local|nuvem> — alterna entre bot.db local e Supabase`,
-            `/local — atalho p/ \`/banco local\``,
-            `/nuvem — atalho p/ \`/banco nuvem\``,
-            `/restart — \`process.exit(1)\` + Docker restart:always`,
-            `/reconnect — força \`ws.close()\` → reconecta Baileys`,
-            `/qr — mostra status do QR / conexão`,
-            `/ativar <jid> — ativa grupo (ex: 120363...@g.us)`,
-            `/desativar <jid> — desativa grupo`,
-            `/broadcast <texto> — pede confirmação, depois \`/broadcast confirmar\` (envio lento anti-ban)`,
-            `foto com legenda /broadcast <texto> — broadcast com imagem`,
-            `/logs — últimos logs do terminal`,
-            `/dump — gera e envia backup (bot.db, .env com API keys, uploads)`,
-            `/help — esta ajuda`
+            `Toque num botão ou digite o comando:`,
+            ``,
+            `📊 *Monitor* — status, QR, logs, banco`,
+            `🧹 *Manutenção* — limpar mortos, broadcast, dump`,
+            `🔌 *Conexão* — reconnect, restart, ativar/desativar`,
+            ``,
+            `_Comandos com texto: /ativar <jid> • /desativar <jid> • /broadcast <texto>_`
         ].join('\n');
-        await send(chatId, help);
+        await send(chatId, help, {
+            buttons: [
+                [{ text: '📊 Status', data: 'cmd:/status' }, { text: '📱 QR', data: 'cmd:/qr' }],
+                [{ text: '📜 Logs', data: 'cmd:/logs' }, { text: '💾 Banco', data: 'cmd:/modo' }],
+                [{ text: '🧹 Limpar mortos', data: 'cmd:/limparmortos' }, { text: '📢 Broadcast', data: 'cmd:/broadcast' }],
+                [{ text: '🔌 Reconnect', data: 'cmd:/reconnect' }, { text: '📦 Dump', data: 'cmd:/dump' }],
+                [{ text: '🔄 Restart', data: 'cmd:/restart' }]
+            ]
+        });
         return;
     }
 
@@ -301,19 +350,25 @@ async function handleUpdate(update) {
                     return null;
                 } catch (_) { return null; }
             })();
+            const connIcon = dash?.status === 'connected' ? '🟢' : dash?.status === 'syncing' || dash?.status === 'connecting' ? '🔄' : '🔴';
+            const wsIcon = wd.isZombie ? '🚨' : '📡';
             const txt = [
-                `*📊 STATUS*`,
-                `Bot: \`${utils.readConfig().botName || '-'}\``,
-                `Conexão: \`${dash?.status || '?'}\` phone: \`${dash?.phone || '-'}\``,
+                `*📊 STATUS — ${utils.readConfig().botName || 'Bot'}*`,
+                `───────────────`,
+                `${connIcon} Conexão: \`${dash?.status || '?'}\` • 📱 \`${dash?.phone || '-'}\``,
                 syncLine,
-                `Banco: \`${dbMode}\` (/modo p/ detalhes)`,
-                `WS: \`${wd.wsState || '?'}\` zumbi: \`${wd.isZombie ? 'SIM 🚨' : 'não'}\` idle: ${Math.round(wd.idleMs/1000)}s`,
-                `Grupos: ativos ${ag} + parciais ${pg}`,
-                `Comandos: ${stats.totalCommands||0} restarts: ${stats.totalRestarts||0}`,
-                `Uptime: ${uptime}`,
-                `Queue: pending ${wd.queue?.pending||0} (dl:${wd.queue?.download||0} send:${wd.queue?.send||0} proc:${wd.queue?.process||0})`
+                `${wsIcon} WS: \`${wd.wsState || '?'}\` • zumbi: \`${wd.isZombie ? 'SIM 🚨' : 'não'}\` • idle: ${Math.round(wd.idleMs/1000)}s`,
+                `───────────────`,
+                `💾 Banco: \`${dbMode}\` • 👥 Grupos: ${ag} ativos + ${pg} parciais`,
+                `⌨️ Comandos: ${stats.totalCommands||0} • 🔄 Restarts: ${stats.totalRestarts||0} • ⏱️ Uptime: ${uptime}`,
+                `📦 Fila: ${wd.queue?.pending||0} pendente(s) (dl:${wd.queue?.download||0} send:${wd.queue?.send||0} proc:${wd.queue?.process||0})`
             ].filter(Boolean).join('\n');
-            await send(chatId, txt);
+            await send(chatId, txt, {
+                buttons: [
+                    [{ text: '🔄 Atualizar', data: 'cmd:/status' }, { text: '📜 Logs', data: 'cmd:/logs' }],
+                    [{ text: '🏠 Menu', data: 'cmd:/help' }]
+                ]
+            });
         } catch (e) { await send(chatId, `❌ Erro status: ${e.message}`); }
         return;
     }
@@ -369,6 +424,12 @@ async function handleUpdate(update) {
         return;
     }
 
+    // /broadcast sem texto: mostra o uso (também destino do botão 📢 do /help)
+    if (lower === '/broadcast') {
+        await send(chatId, `*📢 Broadcast*\n\nEnvia um texto para todos os grupos (devagar, anti-ban).\n\nUso: \`/broadcast <texto>\`\nDepois confirme com \`/broadcast confirmar\` (5 min).\nCom imagem: envie a foto com a legenda \`/broadcast <texto>\`.`);
+        return;
+    }
+
     if (lower.startsWith('/broadcast ')) {
         const broadcastText = text.slice(text.indexOf(' ') + 1).trim();
         if (!broadcastText) { await send(chatId, `❌ Uso: \`/broadcast <texto>\``); return; }
@@ -393,7 +454,8 @@ async function handleUpdate(update) {
                 (targets.pruned.length ? `🧹 ${targets.pruned.length} morto(s) podado(s)\n` : ``) +
                 `📝 \`${broadcastText.slice(0, 200)}\`\n\n` +
                 `❗ Envio em massa idêntico é o que causa *ban temporário*.\n` +
-                `Confirme com \`/broadcast confirmar\` (5 min) ou aguarde expirar.`);
+                `Toque em ✅ ou digite \`/broadcast confirmar\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar envio', data: 'cmd:/broadcast confirmar' }]] });
         } catch (e) { await send(chatId, `❌ Erro broadcast: ${e.message}`); }
         return;
     }
@@ -429,6 +491,71 @@ async function handleUpdate(update) {
         return;
     }
 
+    if (lower === '/limparmortos' || lower.startsWith('/limparmortos ')) {
+        try {
+            const utils = require('../database/utils');
+            const sub = String(args[0] || '').toLowerCase();
+            if (sub === 'confirmar') {
+                const pend = _pendingPurge;
+                _pendingPurge = null;
+                if (!pend || Date.now() > pend.expiresAt) {
+                    await send(chatId, `⚠️ Nada pendente (ou expirou). Rode /limparmortos de novo para varrer.`);
+                    return;
+                }
+                let purged = 0;
+                let logs = 0;
+                const lines = [];
+                for (const jid of pend.jids) {
+                    try {
+                        const r = utils.purgeDeadGroup(jid);
+                        if (r && r.ok) {
+                            purged++;
+                            logs += Number(r.removed?.dashboard_logs) || 0;
+                            lines.push(`• \`${jid.split('@')[0]}\` (logs ${Number(r.removed?.dashboard_logs) || 0})`);
+                        }
+                    } catch (e) {
+                        lines.push(`• \`${jid.split('@')[0]}\` — falha: ${e?.message || e}`);
+                    }
+                }
+                await send(chatId, `*🧹 Limpeza concluída*\n\n✅ ${purged} grupo(s) purgado(s) • ${logs} log(s) apagado(s)\n${lines.slice(0, 30).join('\n')}${lines.length > 30 ? `\n…(+${lines.length - 30})` : ''}`);
+                return;
+            }
+            const sock = global.__baileysSock;
+            const candidates = [...new Set([
+                ...utils.listActiveGroups(),
+                ...utils.listPartialGroups(),
+                ...utils.listNewsGroups()
+            ].filter((j) => j && String(j).endsWith('@g.us')))];
+            if (!candidates.length) { await send(chatId, `✅ Nenhum grupo registrado no banco. Nada a limpar.`); return; }
+            let participating = null;
+            try {
+                if (sock && typeof sock.groupFetchAllParticipating === 'function') {
+                    const p = await sock.groupFetchAllParticipating();
+                    if (p && typeof p === 'object') participating = new Set(Object.keys(p));
+                }
+            } catch (_) { participating = null; }
+            if (!participating) { await send(chatId, `⚠️ Não consegui ler a lista de grupos do WhatsApp agora (sem conexão?). Nada foi apagado.`); return; }
+            const dead = candidates.filter((j) => !participating.has(j));
+            if (!dead.length) { await send(chatId, `✅ Nenhum grupo morto: ${candidates.length} registrado(s), todos com o bot dentro. 🎉`); return; }
+            const flags = (j) => {
+                const f = [];
+                try { if (utils.isActiveGroup(j)) f.push('ativo'); } catch (_) {}
+                try { if (utils.isPartialActive(j)) f.push('parcial'); } catch (_) {}
+                try { if (utils.isNewsEnabled(j)) f.push('news'); } catch (_) {}
+                return f.length ? ` [${f.join('/')}]` : '';
+            };
+            _pendingPurge = { jids: dead, expiresAt: Date.now() + PURGE_CONFIRM_MS };
+            await send(chatId,
+                `*🧹 Grupos mortos* (${dead.length} — bot fora, dados no banco):\n\n` +
+                dead.slice(0, 30).map((j) => `• \`${j.split('@')[0]}\`${flags(j)}`).join('\n') +
+                (dead.length > 30 ? `\n…(+${dead.length - 30})` : '') +
+                `\n\n⚠️ A purga apaga ativação, news, dashboard, rank, logs e mensagens (irreversível).` +
+                `\nToque em ✅ ou digite \`/limparmortos confirmar\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar purga', data: 'cmd:/limparmortos confirmar' }]] });
+        } catch (e) { await send(chatId, `❌ Erro limparmortos: ${e.message}`); }
+        return;
+    }
+
     // fallback: eco help
     await send(chatId, `❓ Comando desconhecido: \`${text.slice(0,40)}\`\nUse /help`);
 }
@@ -439,7 +566,7 @@ async function pollOnce() {
     try {
         const api = _getApi();
         if (!api) return;
-        const res = await api.get('/getUpdates', { params: { offset: _offset, timeout: 25, allowed_updates: JSON.stringify(['message','edited_message']) } });
+        const res = await api.get('/getUpdates', { params: { offset: _offset, timeout: 25, allowed_updates: JSON.stringify(['message','edited_message','callback_query']) } });
         const updates = res.data?.result || [];
         for (const u of updates) {
             _offset = Math.max(_offset, (u.update_id || 0) + 1);
@@ -485,4 +612,4 @@ function stop() {
     _pollTimer = null;
 }
 
-module.exports = { start, stop, send, sendDocument, handleUpdate, isAuthorized };
+module.exports = { start, stop, send, sendDocument, handleUpdate, isAuthorized, answerCallback };

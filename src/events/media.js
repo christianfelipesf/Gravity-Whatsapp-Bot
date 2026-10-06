@@ -150,7 +150,9 @@ async function revealViewOnce(sock, from, m, lastBotResponse, GLOBAL_COOLDOWN, e
                     m.key?.id
                 );
             } catch (_) {
-                mediaInfo = { type: mediaType, url: `data:${mime};base64,${dataBase64}` };
+                // Fallback sem base64: embedar o data: URL aqui gravaria
+                // centenas de KB no media_json do banco (foi o bug dos 47MB).
+                mediaInfo = { type: mediaType, url: null };
             }
 
             const phoneReveal = resolveDisplayNum(sender, fallbackPnReveal) || null;

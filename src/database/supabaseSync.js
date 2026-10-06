@@ -262,9 +262,9 @@ async function backupCloud({ log = console } = {}) {
 }
 
 // Backups pré-pull ficam TODOS dentro de backups/ (nunca na raiz).
-// Rotação: mantém os 7 bot-pre-*.db mais recentes — sem isso a pasta
-// cresce sem limite (um backup por pull do boot).
-const PRE_PULL_KEEP = 7;
+// Rotação: mantém os 3 bot-pre-*.db mais recentes — sem isso a pasta
+// cresce sem limite (um backup por pull do boot, ~70MB cada).
+const PRE_PULL_KEEP = 3;
 function _backupLocalFile(tag) {
     try {
         const fs = require('fs');

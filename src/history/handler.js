@@ -66,7 +66,7 @@ async function handleHistoryLog(sock, m, from, sender, senderName, text, groupMe
                         const info = store.persistReceivedMedia(
                             { type, url: `data:${mime};base64,${b64}`, fileName: inner.fileName || null, sizeBytes: inner.fileLength || buffer.length },
                             msgId
-                        ) || { type, url: `data:${mime};base64,${b64}` };
+                        ) || { type, url: null, sizeBytes: buffer.length };
                         if (type === 'document') { info.fileName = inner.fileName || 'documento'; info.mime = mime; info.sizeBytes = inner.fileLength || buffer.length; }
                         const updateType = isViewOnce(m.message) ? 'viewonce' : 'chat';
                         store.updateMedia(from, msgId, updateType, info);
