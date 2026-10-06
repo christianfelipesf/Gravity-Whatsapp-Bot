@@ -270,6 +270,27 @@ db.exec(`
     );
     CREATE INDEX IF NOT EXISTS idx_pessoas_cidade ON pessoas(cidade);
     CREATE INDEX IF NOT EXISTS idx_pessoas_nascimento ON pessoas(nascimento);
+
+    CREATE TABLE IF NOT EXISTS memes (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path    TEXT NOT NULL,
+        hash         TEXT NOT NULL UNIQUE,
+        sender_jid   TEXT,
+        sender_name  TEXT,
+        sender_phone TEXT,
+        created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memes_created ON memes(created_at DESC);
+
+    -- Anti-repetição por grupo (local, sem sync): quais memes já foram
+    -- sorteados em cada grupo. Limpo quando o ciclo termina.
+    CREATE TABLE IF NOT EXISTS meme_sends (
+        group_jid TEXT NOT NULL,
+        meme_id   INTEGER NOT NULL,
+        sent_at   INTEGER NOT NULL,
+        PRIMARY KEY (group_jid, meme_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_meme_sends_group ON meme_sends(group_jid, sent_at DESC);
 `);
 
 // ============================================================

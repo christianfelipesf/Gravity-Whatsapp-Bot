@@ -86,7 +86,16 @@ const CMD_COOLDOWN_DEFAULTS = {
     interacao: 1000,
     interacoes: 1000,
     dono: 2000,
-    owner: 2000
+    owner: 2000,
+    meme: 10000,
+    memealeatorio: 10000,
+    memerandom: 10000,
+    postarmeme: 15000,
+    novomeme: 15000,
+    memenovo: 15000,
+    delmeme: 3000,
+    deletememe: 3000,
+    apagarmeme: 3000,
 };
 
 function getKey(commandName, userId) {

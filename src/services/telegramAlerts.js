@@ -219,6 +219,88 @@ async function notifyCommand({ botName, commandName, prefix, senderName, sender,
     return sendAlert(lines, { key: `cmd:${commandName}`, cooldownMs: 0, parseMode: 'Markdown' });
 }
 
+// --- Sync pós-reconnect: UMA mensagem editada (sem flood) ---
+let _syncMsgId = null;
+let _syncLastEditAt = 0;
+
+async function _sendSyncRaw(text) {
+    const token = _getToken();
+    const chatId = _getChatId();
+    if (!token || !chatId) return { ok: false, error: 'not_configured' };
+    try {
+        const res = await _getAxios().post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text: String(text).slice(0, 4000),
+            disable_notification: true
+        });
+        const mid = res.data?.result?.message_id || null;
+        if (mid) { _syncMsgId = mid; _syncLastEditAt = Date.now(); }
+        return { ok: !!res.data?.ok, messageId: mid };
+    } catch (e) {
+        return { ok: false, error: e.response?.data?.description || e.message };
+    }
+}
+
+async function _editSyncRaw(text) {
+    const token = _getToken();
+    const chatId = _getChatId();
+    if (!token || !chatId || !_syncMsgId) return _sendSyncRaw(text);
+    try {
+        await _getAxios().post(`https://api.telegram.org/bot${token}/editMessageText`, {
+            chat_id: chatId,
+            message_id: _syncMsgId,
+            text: String(text).slice(0, 4000),
+            disable_notification: true
+        });
+        _syncLastEditAt = Date.now();
+        return { ok: true, edited: true };
+    } catch (e) {
+        const desc = e.response?.data?.description || '';
+        // msg antiga demais / sem mudança: reenvia uma vez e segue
+        if (/message to edit not found|message is not modified/i.test(desc)) {
+            return _sendSyncRaw(text);
+        }
+        return { ok: false, error: desc || e.message };
+    }
+}
+
+function _syncBar(pct, width = 12) {
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    const f = Math.round((p / 100) * width);
+    return '█'.repeat(f) + '░'.repeat(width - f);
+}
+
+async function notifySyncStart({ phase } = {}) {
+    _syncMsgId = null;
+    const txt = `🔄 *SINCRONIZANDO* — bot reconectado, drenando fila offline...\n${_syncBar(0)} 0%\nFase: ${phase || 'connecting'}\n_Comandos antigos serão descartados; novos respondem em seguida._`;
+    // sendAlert com parseMode Markdown aqui (mensagem nova, não edição)
+    const r = await sendAlert(txt, { key: 'sync', cooldownMs: 0, disableNotification: true });
+    // sendAlert não retorna message_id; busca via send cru só se configurado
+    // e sem msg anterior — tenta capturar o id com envio direto na próxima vez.
+    // Para garantir edit, faz um envio cru adicional? Não — evita duplicar:
+    // usa o truque: se r.ok, o próximo progress cria a msg editável.
+    if (r.ok) { _syncLastEditAt = Date.now(); }
+    return r;
+}
+
+async function notifySyncProgress({ pct = 0, received = 0, discarded = 0, processed = 0, phase = 'draining' } = {}) {
+    const now = Date.now();
+    // throttle: 1 edição / 5s (o syncProgress já filtra por 10%, aqui é rede)
+    if (_syncMsgId && now - _syncLastEditAt < 5000) return { ok: false, error: 'throttled' };
+    const txt = `🔄 SINCRONIZANDO — ${_syncBar(pct)} ${Math.round(pct)}%\nFase: ${phase} • recebidas ${received} • descartadas ${discarded} • novas ${processed}\n_Comandos antigos descartados; novos já respondem._`;
+    if (!_syncMsgId) return _sendSyncRaw(txt);
+    return _editSyncRaw(txt);
+}
+
+async function notifySyncDone({ received = 0, discarded = 0, processed = 0, reason = '' } = {}) {
+    const txt = `✅ SINCRONIZAÇÃO CONCLUÍDA\nRecebidas ${received} • descartadas ${discarded} • novas ${processed}${reason ? `\n_${String(reason).slice(0, 120)}_` : ''}\nBot pronto — comandos respondendo normalmente.`;
+    let r;
+    if (_syncMsgId) r = await _editSyncRaw(txt);
+    else r = await sendAlert(txt, { key: 'sync', cooldownMs: 0, disableNotification: true });
+    _syncMsgId = null;
+    return r;
+}
+
 // Teste manual
 async function test() {
     return sendAlert(
@@ -240,6 +322,9 @@ module.exports = {
     notifyZombie,
     notifyDisconnect,
     notifyConnected,
+    notifySyncStart,
+    notifySyncProgress,
+    notifySyncDone,
     notifyQr,
     notifyError,
     notifyCommand,

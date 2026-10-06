@@ -290,17 +290,29 @@ async function handleUpdate(update) {
                 const s = Math.floor(ms/1000); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return `${h}h ${m}m`;
             })();
             const dbMode = (() => { try { return require('../database/supabaseSync').isSyncKilled() ? 'LOCAL' : 'NUVEM'; } catch (_) { return '?'; } })();
+            const syncLine = (() => {
+                try {
+                    const sp = require('./syncProgress').getState();
+                    if (sp.phase === 'draining' || sp.phase === 'connecting') {
+                        return `Sync: 🔄 ${sp.phase} ${sp.pct}% (rec ${sp.received} desc ${sp.discarded} novas ${sp.processed})`;
+                    }
+                    if (sp.phase === 'failed') return `Sync: ⚠️ falhou (${sp.failReason || '?'})`;
+                    if (sp.received > 0) return `Sync: ✅ pronto (rec ${sp.received} desc ${sp.discarded})`;
+                    return null;
+                } catch (_) { return null; }
+            })();
             const txt = [
                 `*📊 STATUS*`,
                 `Bot: \`${utils.readConfig().botName || '-'}\``,
                 `Conexão: \`${dash?.status || '?'}\` phone: \`${dash?.phone || '-'}\``,
+                syncLine,
                 `Banco: \`${dbMode}\` (/modo p/ detalhes)`,
                 `WS: \`${wd.wsState || '?'}\` zumbi: \`${wd.isZombie ? 'SIM 🚨' : 'não'}\` idle: ${Math.round(wd.idleMs/1000)}s`,
                 `Grupos: ativos ${ag} + parciais ${pg}`,
                 `Comandos: ${stats.totalCommands||0} restarts: ${stats.totalRestarts||0}`,
                 `Uptime: ${uptime}`,
                 `Queue: pending ${wd.queue?.pending||0} (dl:${wd.queue?.download||0} send:${wd.queue?.send||0} proc:${wd.queue?.process||0})`
-            ].join('\n');
+            ].filter(Boolean).join('\n');
             await send(chatId, txt);
         } catch (e) { await send(chatId, `❌ Erro status: ${e.message}`); }
         return;

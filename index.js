@@ -12,8 +12,13 @@ try {
     const si = require('./src/services/singleInstance');
     const lock = si.acquire();
     if (!lock.ok) {
+        // NÃO usar exit(0): o pm2 tem `stop_exit_codes: [0]` por padrão, então
+        // saída 0 faz o pm2 marcar o app como "stopped" e nunca mais reiniciar —
+        // se o lock for de um órfão que morre depois, o bot fica morto de vez.
+        // Saída 1 faz o pm2 tentar de novo (o acquire espera ~30s, então é um
+        // retry lento que se auto-corrige quando a duplicata some).
         console.error(`⛔ [singleInstance] outra instância já está ativa (pid=${lock.holder?.pid} pm2=${lock.holder?.pm2 ?? false}) — abortando para evitar sessão fantasma/440.`);
-        process.exit(0);
+        process.exit(1);
     }
     if (lock.degraded) {
         console.warn(`⚠️ [singleInstance] lock indisponível (${lock.error?.message || lock.error}) — seguindo sem proteção`);
@@ -369,6 +374,7 @@ async function startBot() {
                 try { dashboard.setConnectionState({ status: 'disconnected', qr: null, phone: null }); } catch (_) {}
                 try { require('./src/services/subConnLog').connlog('principal', 'close', `code=${code ?? '?'} reason=${reasonName}`); } catch (_) {}
                 try { telegram.notifyDisconnect({ botName: config.botName, code: code ?? '?', reasonName, phone: null }).catch(()=>{}); } catch (_) {}
+                try { require('./src/services/syncProgress').fail(`close code=${code ?? '?'} ${reasonName}`); } catch (_) {}
                 if (!global.__baileysEnabled || _qrAttempts >= MAX_QR_ATTEMPTS) {
                     if (!global.__baileysEnabled) console.log('⏸️ [Baileys] desconexão manual — não reconectando');
                     else console.log(`⏸️ QR limit reached (${MAX_QR_ATTEMPTS}). Auto-retry stopped.`);
@@ -436,6 +442,9 @@ async function startBot() {
                     principalState.setConnected({ version, phone });
                     principalState.setSock(sock);
                 } catch (_) {}
+                // Pós-reconnect: drena fila offline descartando backlog e
+                // mostrando barra no terminal + Telegram (syncProgress).
+                try { require('./src/services/syncProgress').startDraining(); } catch (_) {}
                 try { watchdog.touchConnection(); } catch (_) {}
                 try { telegram.notifyConnected({ botName: config.botName, phone, version: botVersion }).catch(()=>{}); } catch (_) {}
                 try {
@@ -453,6 +462,8 @@ async function startBot() {
             }
             if (u.connection === 'connecting') {
                 console.log(`⏳ [CONNECTION] connecting... attemptId=${_restartNumber}-${_qrAttempts}`);
+                try { require('./src/services/syncProgress').start('connecting'); } catch (_) {}
+                try { require('./src/services/principalState').setSyncing(0, 'connecting'); } catch (_) {}
             }
         });
 

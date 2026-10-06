@@ -7,6 +7,11 @@ let _phone = null;
 let _connectedAt = null;
 let _sock = null;
 let _qr = null;
+// Sync pós-reconnect (barra de progresso): ativo entre connecting/open e
+// fim do dreno do backlog. Não muda _connected — só o status exposto.
+let _syncActive = false;
+let _syncPct = 0;
+let _syncEtapa = null;
 
 function setQr(qr) { _qr = qr || null; }
 function clearQr() { _qr = null; }
@@ -22,22 +27,52 @@ function setConnected(meta = {}) {
     _phone = meta.phone || _phone;
     _connectedAt = _connectedAt || new Date();
     _qr = null;
+    // open() inicia o dreno do backlog: marca syncing em vez de
+    // "connected" imediato — /status e watchdog veem o progresso.
+    _syncActive = true;
+    _syncPct = 0;
+    _syncEtapa = 'draining';
     if (!wasConnected) emitter.emit('connected', getState());
+    else emitter.emit('sync', getState());
+}
+
+function setSyncing(pct = 0, etapa = 'draining') {
+    _syncActive = true;
+    _syncPct = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    _syncEtapa = String(etapa || 'draining').slice(0, 40);
+    emitter.emit('sync', getState());
+}
+
+function finishSync() {
+    _syncActive = false;
+    _syncPct = 100;
+    _syncEtapa = null;
+    emitter.emit('sync', getState());
 }
 
 function setDisconnected() {
     _connected = false;
+    _syncActive = false;
+    _syncPct = 0;
+    _syncEtapa = null;
     emitter.emit('disconnected');
 }
 
 function getState() {
+    let status;
+    if (_qr) status = 'qr';
+    else if (_syncActive) status = _connected ? 'syncing' : 'connecting';
+    else status = _connected ? 'connected' : 'disconnected';
     return {
         connected: _connected,
-        status: _connected ? 'connected' : 'disconnected',
+        status,
         version: _version,
         phone: _phone,
         qr: _qr,
-        connectedAt: _connectedAt
+        connectedAt: _connectedAt,
+        syncActive: _syncActive,
+        syncPct: _syncPct,
+        syncEtapa: _syncEtapa
     };
 }
 
@@ -62,6 +97,8 @@ function getVersion() { return _version; }
 
 module.exports = {
     setConnected,
+    setSyncing,
+    finishSync,
     setDisconnected,
     setQr,
     clearQr,

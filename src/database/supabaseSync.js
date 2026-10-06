@@ -27,6 +27,7 @@ const SYNC_TABLES = [
     'group_modlog',
     'rank_monthly_history',
     'pessoas',
+    'memes',
 ];
 
 // Coluna(s) de conflito para o upsert (PostgREST ?on_conflict=)
@@ -51,6 +52,7 @@ const CONFLICT_TARGET = {
     group_modlog: 'id',
     rank_monthly_history: 'jid,month',
     pessoas: 'id',
+    memes: 'id',
 };
 
 // Tabelas com volume alto: limita o pull/push aos N mais recentes.
@@ -98,6 +100,7 @@ const NUMERIC_COLS = {
     group_modlog: ['id', 'timestamp'],
     rank_monthly_history: ['total', 'created_at'],
     pessoas: ['id', 'created_at', 'updated_at'],
+    memes: ['id', 'created_at'],
 };
 
 function _coerceForCloud(table, col, v) {
@@ -392,6 +395,7 @@ const REPLACE_TABLES = {
     group_blacklist: 'added_at=gte.0',
     login_allowed: 'added_at=gte.0',
     pessoas: 'created_at=gte.0',
+    memes: 'created_at=gte.0',
     antiflood_config: 'updated_at=gte.0',
     dashboard_groups: 'updated_at=gte.0',
     dashboard_group_info: 'updated_at=gte.0',

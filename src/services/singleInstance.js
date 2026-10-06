@@ -13,7 +13,11 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const DEFAULT_LOCK_PATH = path.join(process.cwd(), 'session', '.instance.lock');
+// Caminho absoluto a partir do módulo (não do cwd): pm2 pode iniciar o app com
+// cwd diferente do shell e, com cwd relativo, cada um criaria um lock distinto —
+// a proteção contra sessão fantasma simplesmente não valeria.
+const DEFAULT_LOCK_PATH = process.env.BOT_INSTANCE_LOCK
+    || path.join(__dirname, '..', '..', 'session', '.instance.lock');
 const TOKEN = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
 // PM2 marca o processo filho com pm_id / NODE_APP_INSTANCE.
 const IS_PM2 = process.env.pm_id != null || process.env.NODE_APP_INSTANCE != null;

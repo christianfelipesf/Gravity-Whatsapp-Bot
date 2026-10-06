@@ -143,15 +143,24 @@ let lastBotResponse = 0;
 module.exports = {
     handleMessageUpsert: async (sock, { messages, type }, { commands, config, startTime }) => {
         if (type !== 'notify' && !messages?.some(msg => msg?.key?.fromMe)) return;
+        // Contabiliza o lote no dreno pós-reconnect (barra de progresso).
+        try { require('../services/syncProgress').onBatch((messages || []).length); } catch (_) {}
         const _evtStart = Date.now();
         try {
             // B1: antes só messages[0] — lote Baileys com N msgs perdia N-1.
             // Agora itera sequencialmente (ordem preservada, sem concorrência).
+            let _i = 0;
             for (const m of (messages || [])) {
                 try {
                     await _handleSingleMessage(sock, m, { commands, config, startTime });
                 } catch (e) {
                     console.error(`[${trace.ts()}] [evt] mensagem ${m?.key?.id || '?'} ERRO: ${e.message} | stack[0]=${(e.stack||'').split('\n')[1]?.trim() || ''}`);
+                }
+                // Lotes gigantes de backlog (centenas de msgs offline) não
+                // podem travar o loop: cede o event loop a cada 25 msgs para
+                // comandos novos furarem a fila mais rápido.
+                if ((++_i % 25) === 0) {
+                    try { await new Promise(r => setImmediate(r)); } catch (_) {}
                 }
             }
         } catch (e) {
@@ -191,15 +200,33 @@ async function _handleSingleMessage(sock, m, { commands, config, startTime }) {
                 else messageTime = Number(m.messageTimestamp) || 0;
                 if (messageTime > 1e12) messageTime = Math.floor(messageTime / 1000);
             }
-            if (messageTime < Math.floor(startTime / 1000) + 2) return;
+            // Fast-discard do dreno pós-reconnect: backlog anterior ao open
+            // é descartado SEM groupMetadata/humanize/DB — só contador para
+            // a barra. Comandos novos (ts >= drainStart) seguem normalmente.
+            try {
+                const sp = require('../services/syncProgress');
+                if (sp.isDraining() && sp.shouldFastDiscard(messageTime, !!m.key.fromMe)) {
+                    sp.countDiscarded(1);
+                    return;
+                }
+            } catch (_) {}
+            if (messageTime < Math.floor(startTime / 1000) + 2) {
+                try { require('../services/syncProgress').countDiscarded(1); } catch (_) {}
+                return;
+            }
             // Replay antigo (reconnect/offline re-entregando notify de minutos
             // atrás): ignora. Não afeta mensagens novas nem fromMe.
             try {
                 if (messageTime > 0 && !m.key.fromMe) {
                     const ageMs = Date.now() - messageTime * 1000;
-                    if (ageMs > REPLAY_MAX_AGE_MS) return;
+                    if (ageMs > REPLAY_MAX_AGE_MS) {
+                        try { require('../services/syncProgress').countDiscarded(1); } catch (_) {}
+                        return;
+                    }
                 }
             } catch (_) {}
+            // Msg nova durante o dreno: conta como processada (barra anda).
+            try { require('../services/syncProgress').countProcessed(1); } catch (_) {}
 
             _evictDedupIfNeeded();
             try { processedMessages.set(dedupKey, Date.now()); } catch (_) {}

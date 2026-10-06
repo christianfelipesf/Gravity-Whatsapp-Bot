@@ -23,7 +23,6 @@ module.exports = {
             `╭─── *GERAL* ───\n` +
             `${B} 🏆 *${p}rank* — top 10 ativos do mês (alias ${p}rankativos)\n` +
             `${B} 🌍 *${p}rankglobal* — top global + foto dos grupos\n` +
-            `${B} 🗳️ *${p}apuracao* — presidente em tempo real, com foto (alias ${p}eleicao)\n` +
             `${B} 👤 *${p}perfil* — foto do perfil\n` +
             `${B} 📊 *${p}status* — info do bot\n` +
             `${B} 🤖 *${p}ai* <texto> — conversa com IA\n` +
@@ -44,7 +43,8 @@ module.exports = {
             `${B} 📥 *${p}dhd* <link> — download HD\n` +
             `${B} 🗣️ *${p}tts* <texto> — texto → áudio\n` +
             `${B} 🎙️ *${p}transcrever* — áudio/vídeo → texto (marque o áudio)\n` +
-            `${B} ⚡ *${p}acelerar* • 🐌 *${p}desacelerar* — áudio/vídeo\n` +
+             `${B} ⚡ *${p}acelerar* • 🐌 *${p}desacelerar* — áudio/vídeo\n` +
+             `${B} 😂 *${p}meme* — meme aleatório • *${p}postarmeme* adiciona (marque a foto)\n` +
             `╰───────────────\n\n` +
             `╭─── *INTERAÇÃO* ───\n` +
             `${B} 💞 *${p}comandosinteracao* — beijar, abraço etc\n` +
