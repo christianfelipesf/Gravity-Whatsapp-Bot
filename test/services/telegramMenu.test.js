@@ -95,4 +95,40 @@ describe('telegram menu clicável', () => {
         const labels = p.reply_markup.inline_keyboard.flat().map((b) => b.text).join(' ');
         assert.ok(labels.includes('Atualizar') && labels.includes('Menu'), 'botões esperados: ' + labels);
     });
+
+    it('/config espelha o comando do WhatsApp (só leitura)', async () => {
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/config' }, update_id: 6 });
+        const p = lastSend();
+        assert.ok(p && String(p.text).includes('CONFIGURA'), '/config deve exibir configurações');
+    });
+
+    it('/set sem valor não escreve nada (uso + ajuda)', async () => {
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/set' }, update_id: 7 });
+        let p = lastSend();
+        assert.ok(p && String(p.text).includes('set <par'), '/set puro mostra uso');
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/set paramInvalidoXYZ123' }, update_id: 8 });
+        p = lastSend();
+        assert.ok(p && String(p.text).includes('inválido'), 'parâmetro inválido é rejeitado sem escrever');
+    });
+
+    it('/news status mostra global + assinantes (só leitura)', async () => {
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/news status' }, update_id: 9 });
+        const p = lastSend();
+        assert.ok(p && String(p.text).includes('Feed global'), '/news status deve responder');
+    });
+
+    it('/update pede confirmação e não executa de imediato', async () => {
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/update' }, update_id: 10 });
+        const p = lastSend();
+        assert.ok(p && String(p.text).includes('Update'), '/update deve pedir confirmação');
+        const labels = (p.reply_markup?.inline_keyboard || []).flat().map((b) => b.text).join(' ');
+        assert.ok(labels.includes('Confirmar update'), 'confirmação deve ter botão, got: ' + labels);
+        assert.ok(!String(p.text).includes('Atualizado!'), 'não pode puxar antes de confirmar');
+    });
+
+    it('/grupos responde mesmo sem Baileys (sem quebrar)', async () => {
+        await tg.handleUpdate({ message: { chat: { id: 999 }, text: '/grupos' }, update_id: 11 });
+        const p = lastSend();
+        assert.ok(p, '/grupos deve responder algo');
+    });
 });

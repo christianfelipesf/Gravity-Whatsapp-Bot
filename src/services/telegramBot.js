@@ -133,6 +133,73 @@ async function downloadTelegramFile(fileId) {
 const _pendingBroadcast = new Map(); // chatId -> { kind:'text'|'image', text, imgBuf, expiresAt }
 const BROADCAST_CONFIRM_MS = 5 * 60 * 1000;
 
+// Pendência do /update confirmar (uma por vez, expira em 5 min).
+let _pendingUpdate = null;
+const UPDATE_CONFIRM_MS = 5 * 60 * 1000;
+
+// Ponte WhatsApp→Telegram: executa um comando de src/commands/ como se o
+// dono tivesse digitado no chat. Reaproveita validações e regras sem duplicar.
+// sock.sendMessage é redirecionado ao Telegram (reações Baileys são ignoradas);
+// permissões passam via fromMe:true (chat Telegram já é autorizado).
+async function runWaCommand(chatId, name, argStr) {
+    const { resolveCommand, loadCommands } = require('../commands/loader');
+    let cmd = null;
+    try { cmd = resolveCommand(name); } catch (_) {}
+    if (!cmd) {
+        // Fora do boot (ex.: testes): carrega sob demanda.
+        try { if (typeof loadCommands === 'function') loadCommands(); } catch (_) {}
+        try { cmd = resolveCommand(name); } catch (_) {}
+    }
+    if (!cmd) { await send(chatId, `❌ Comando interno não encontrado: ${name}`); return; }
+    const liveSock = global.__baileysSock;
+    const args = String(argStr || '').trim().split(/ +/).filter(Boolean);
+    const fakeSock = {
+        user: (liveSock && liveSock.user) || { id: 'bot@s.whatsapp.net' },
+        sendMessage: async (jid, content) => {
+            try {
+                if (!content || typeof content !== 'object') {
+                    if (content == null) return {};
+                    await send(chatId, String(content).slice(0, 4000));
+                    return {};
+                }
+                const isOnlyReact = content.react && !content.text && !content.image && !content.video
+                    && !content.audio && !content.sticker && !content.document;
+                if (isOnlyReact) return {};
+                const text = content.text || content.caption || '';
+                if (!text) return {};
+                await send(chatId, String(text).slice(0, 4000));
+            } catch (_) {}
+            return {};
+        }
+    };
+    if (liveSock && typeof liveSock.groupMetadata === 'function') {
+        fakeSock.groupMetadata = liveSock.groupMetadata.bind(liveSock);
+    }
+    if (liveSock && typeof liveSock.groupFetchAllParticipating === 'function') {
+        fakeSock.groupFetchAllParticipating = liveSock.groupFetchAllParticipating.bind(liveSock);
+    }
+    const m = { key: { id: `tg-${Date.now()}`, remoteJid: 'telegram', fromMe: true } };
+    const utils = require('../database/utils');
+    let ai = null;
+    try { ai = require('./ai'); } catch (_) {}
+    const ctx = {
+        from: 'telegram',
+        isGroup: false,
+        sender: fakeSock.user.id,
+        config: utils.readConfig(),
+        utils,
+        fullArgsText: String(argStr || ''),
+        args,
+        commandName: name,
+        lastBotResponse: 0,
+        GLOBAL_COOLDOWN: 0,
+        model: null,
+        ai,
+        mediaHandler: null
+    };
+    return cmd.execute(fakeSock, m, ctx);
+}
+
 // Pendência do /limparmortos confirmar (uma por vez, expira em 5 min).
 let _pendingPurge = null;
 const PURGE_CONFIRM_MS = 5 * 60 * 1000;
@@ -266,6 +333,8 @@ async function handleUpdate(update) {
                 [{ text: '📜 Logs', data: 'cmd:/logs' }, { text: '💾 Banco', data: 'cmd:/modo' }],
                 [{ text: '🧹 Limpar mortos', data: 'cmd:/limparmortos' }, { text: '📢 Broadcast', data: 'cmd:/broadcast' }],
                 [{ text: '🔌 Reconnect', data: 'cmd:/reconnect' }, { text: '📦 Dump', data: 'cmd:/dump' }],
+                [{ text: '🔄 Update', data: 'cmd:/update' }, { text: '⚙️ Config', data: 'cmd:/config' }],
+                [{ text: '👥 Grupos', data: 'cmd:/grupos' }, { text: '📰 News', data: 'cmd:/news status' }],
                 [{ text: '🔄 Restart', data: 'cmd:/restart' }]
             ]
         });
@@ -556,6 +625,89 @@ async function handleUpdate(update) {
         return;
     }
 
+    if (lower === '/config' || lower.startsWith('/config ')) {
+        try { await runWaCommand(chatId, 'config', ''); }
+        catch (e) { await send(chatId, `❌ Erro config: ${e.message}`); }
+        return;
+    }
+
+    if (lower === '/set' || lower.startsWith('/set ')) {
+        try {
+            const rest = text.slice(text.indexOf(' ') + 1);
+            await runWaCommand(chatId, 'set', lower === '/set' ? '' : rest);
+        } catch (e) { await send(chatId, `❌ Erro set: ${e.message}`); }
+        return;
+    }
+
+    if (lower === '/grupos' || lower.startsWith('/grupos ')) {
+        try { await runWaCommand(chatId, 'grupos', ''); }
+        catch (e) { await send(chatId, `❌ Erro grupos: ${e.message}`); }
+        return;
+    }
+
+    if (lower === '/news' || lower.startsWith('/news ')) {
+        try {
+            const utils = require('../database/utils');
+            const sub = String(args[0] || '').toLowerCase();
+            const svc = () => ((typeof global !== 'undefined' && global.__botServices && global.__botServices.news) || null);
+            if (sub === 'on' || sub === 'ativar' || sub === 'ligar') {
+                const cfg = utils.readConfig();
+                cfg.newsEnabled = true;
+                utils.writeConfig(cfg);
+                const s = svc();
+                if (s) { try { s.stop(); s.start(); } catch (_) {} }
+                await send(chatId, `🟢 *Feed global ATIVADO* (vale p/ grupos com news ligado).`);
+                return;
+            }
+            if (sub === 'off' || sub === 'desativar' || sub === 'desligar') {
+                const cfg = utils.readConfig();
+                cfg.newsEnabled = false;
+                utils.writeConfig(cfg);
+                const s = svc();
+                if (s) { try { s.stop(); } catch (_) {} }
+                await send(chatId, `🔴 *Feed global DESATIVADO* (polling parado).`);
+                return;
+            }
+            const cfg = utils.readConfig();
+            const n = utils.listNewsGroups().length;
+            await send(chatId,
+                `*📰 Feed global:* \`${cfg.newsEnabled !== false ? '🟢 ATIVO' : '🔴 DESATIVADO'}\`\n` +
+                `👥 Grupos assinantes: ${n}\n\n` +
+                `Uso: \`/news on\` • \`/news off\` • \`/news status\``);
+        } catch (e) { await send(chatId, `❌ Erro news: ${e.message}`); }
+        return;
+    }
+
+    if (lower === '/update' || lower.startsWith('/update ')) {
+        try {
+            const sub = String(args[0] || '').toLowerCase();
+            if (sub === 'confirmar') {
+                const pend = _pendingUpdate;
+                _pendingUpdate = null;
+                if (!pend || Date.now() > pend.expiresAt) {
+                    await send(chatId, `⚠️ Nada pendente (ou expirou). Rode /update de novo.`);
+                    return;
+                }
+                await send(chatId, `⬇️ *Atualizando...* (git pull + restart)`);
+                await runWaCommand(chatId, 'update', '');
+                return;
+            }
+            let cur = 'versão atual desconhecida';
+            try {
+                const { execFileSync } = require('child_process');
+                const short = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { windowsHide: true }).toString().trim();
+                const subj = execFileSync('git', ['log', '-1', '--pretty=%s'], { windowsHide: true }).toString().trim().slice(0, 80);
+                if (short) cur = `\`${short}\` ${subj}`;
+            } catch (_) {}
+            _pendingUpdate = { expiresAt: Date.now() + UPDATE_CONFIRM_MS };
+            await send(chatId,
+                `*🔄 Update*\n\n📌 Atual: ${cur}\n\nVai rodar \`git pull\` + reiniciar (segundos fora do ar).\n` +
+                `Toque em ✅ ou digite \`/update confirmar\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar update', data: 'cmd:/update confirmar' }]] });
+        } catch (e) { await send(chatId, `❌ Erro update: ${e.message}`); }
+        return;
+    }
+
     // fallback: eco help
     await send(chatId, `❓ Comando desconhecido: \`${text.slice(0,40)}\`\nUse /help`);
 }
@@ -612,4 +764,4 @@ function stop() {
     _pollTimer = null;
 }
 
-module.exports = { start, stop, send, sendDocument, handleUpdate, isAuthorized, answerCallback };
+module.exports = { start, stop, send, sendDocument, handleUpdate, isAuthorized, answerCallback, runWaCommand };
