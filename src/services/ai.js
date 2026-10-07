@@ -266,7 +266,7 @@ function setupAI(config) {
     const temperature = config.aiTemperature !== undefined ? Number(config.aiTemperature) : 0.7;
     const cacheTtl = Number(config.aiCacheTtl) || 300000;
     const retryCount = Number(config.aiRetryCount) || 2;
-    const maxPromptLength = Number(config.aiMaxPromptLength) || 2000;
+    const maxPromptLength = Number(config.aiMaxPromptLength) || 8000;
 
     model = {
         generateContent: async (prompt, opts = {}) => {

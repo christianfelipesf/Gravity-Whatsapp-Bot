@@ -211,11 +211,14 @@ async function executeTool(name, args, ctx) {
                 let out = `Pessoa: ${personName}`;
                 if (p.alternatives?.length) out += ` (também achei: ${p.alternatives.map((x, i) => safePersonLabel(x.name || x.senderJid, `pessoa ${String.fromCharCode(66 + (i % 25))}`)).join(', ')})`;
                 const tr = a.periodo ? extractTimeRange(String(a.periodo)) : null;
-                const winTag = tr ? ` ${tr.label}` : '';
+                const winTag = tr ? ` ${tr.label}` : ' no histórico todo';
                 const lim = clampLim(a.limite, 12);
+                // Sem período: busca pool largo (100) p/ amostrar o período
+                // todo — senão "resume a pessoa" vira só as últimas falas.
+                const fetchLim = tr ? 20 : 100;
                 let msgs = (tr && utils?.getMessagesBySenderRange)
                     ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 20) || [])
-                    : (utils?.getMessagesBySender?.(p.jid, p.alias, lim) || []);
+                    : (utils?.getMessagesBySender?.(p.jid, p.alias, fetchLim) || []);
                 let approx = false;
                 let where = '';
                 // Fallback por nome SEMPRE (funde com dedupe): cobre grupos que
@@ -238,9 +241,9 @@ async function executeTool(name, args, ctx) {
                                 for (const r of extra) collected.push({ gj: r.jid || gj, r });
                                 if (collected.length >= 40) break;
                             } else {
-                                const extra = likeFn?.call(utils, gj, pname, lim) || [];
+                                const extra = likeFn?.call(utils, gj, pname, tr ? lim : 100) || [];
                                 for (const r of extra) collected.push({ gj: r.jid || gj, r });
-                                if (collected.length >= 24) break;
+                                if (collected.length >= (tr ? 24 : 200)) break;
                             }
                         }
                         let pool = collected;
@@ -254,11 +257,32 @@ async function executeTool(name, args, ctx) {
                             const fbRows = pool.map(({ r }) => ({ text: r.text, name: r.push_name, timestamp: r.time, fb: true }));
                             const merged = mergeMsgLists(msgs.map((x) => ({ ...x, fb: false })), fbRows);
                             if (merged.some((x) => x.fb)) approx = true;
-                            msgs = merged.slice(-lim);
+                            if (!tr && merged.length > lim) {
+                                // amostra distribuída antigas→recentes (não só últimas)
+                                const step = merged.length / lim;
+                                const sampled = [];
+                                for (let i = 0; i < lim - 1; i++) sampled.push(merged[Math.floor(i * step)]);
+                                sampled.push(merged[merged.length - 1]);
+                                sampled.sort((x, y) => (Number(x.timestamp) || 0) - (Number(y.timestamp) || 0));
+                                msgs = sampled;
+                                where += ` (amostra ${lim} de ${merged.length})`;
+                            } else {
+                                msgs = merged.slice(-lim);
+                            }
                         }
                     }
                 }
                 if (!msgs.length) return `${out}\nSem mensagens${winTag} no histórico.`;
+                if (!tr && msgs.length > lim) {
+                    const total = msgs.length;
+                    const step = total / lim;
+                    const sampled = [];
+                    for (let i = 0; i < lim - 1; i++) sampled.push(msgs[Math.floor(i * step)]);
+                    sampled.push(msgs[total - 1]);
+                    sampled.sort((x, y) => (Number(x.timestamp) || 0) - (Number(y.timestamp) || 0));
+                    msgs = sampled;
+                    if (!/amostra/.test(where)) where += ` (amostra ${lim} de ${total})`;
+                }
                 return `${out} — ${msgs.length} msgs${winTag}${where}${approx ? ' (aproximado por nome)' : ''}:\n` + msgLines(msgs, 150).join('\n');
             }
             case 'buscar_mensagens_grupo': {

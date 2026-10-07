@@ -1,4 +1,4 @@
-const { resolveTargets, buildEvidence, buildComparisonEvidence, matchFactual, wantsLogs, evidenceIsEmpty, extractTimeRange, rangesForComparison } = require('../services/ownerEvidence');
+const { resolveTargets, buildEvidence, buildComparisonEvidence, matchFactual, wantsLogs, wantsProfileSummary, evidenceIsEmpty, extractTimeRange, rangesForComparison } = require('../services/ownerEvidence');
 
 // Confirmações pendentes do modo investigar: chave `${from}::${sender}`.
 // Evita rodar investigação cara (multi-chamadas de IA) sem querer.
@@ -47,7 +47,7 @@ async function doInvestigate(sock, m, { from, isGroup, sender, config, utils, mo
     return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
 }
 
-const OWNER_SYSTEM = 'Você é o auxiliar privado do dono do bot 🤖. Responda com emojis ✨, de forma direta e objetiva, com base APENAS nas evidências abaixo (mensagens reais, advertências e atividade). ⚠️ Só mencione advertências se o dono perguntar sobre isso — nunca traga esse assunto por conta própria. Se houver mensagens na evidência, SEMPRE faça o resumo do jeito/tom da pessoa com o que tem: nunca diga "não há dados suficientes" só porque falta um detalhe (ex.: gostos específicos); nesse caso resuma o que dá pra ver e diga com emoji o que não deu pra saber 🤷. Só diga que não há dados suficientes quando a evidência estiver realmente vazia (zero mensagens). Nunca invente nomes, números ou fatos. Identificadores técnicos (jids como "123@lid"/"456@s.whatsapp.net" ou sequências numéricas longas) são internos: NUNCA os repita na resposta; refira-se às pessoas só pelo nome, ou "a pessoa"/"pessoa A, B" quando o nome for desconhecido. Você só responde perguntas, nunca executa ações.';
+const OWNER_SYSTEM = 'Você é o auxiliar privado do dono do bot 🤖. Responda com emojis ✨, de forma direta e objetiva, com base APENAS nas evidências abaixo (mensagens reais, advertências e atividade). ⚠️ Só mencione advertências se o dono perguntar sobre isso — nunca traga esse assunto por conta própria. Quando a evidência disser "no histórico todo (amostra distribuída)", é um RESUMÃO do período inteiro: faça perfil completo com temas recorrentes, gostos/interesses que aparecem nas falas (comida, música, time, hobbies etc.), jeito/tom da pessoa e exemplos — nunca resuma só as 2-3 últimas linhas. Se houver mensagens na evidência, SEMPRE faça o resumo do jeito/tom da pessoa com o que tem: nunca diga "não há dados suficientes" só porque falta um detalhe (ex.: gostos específicos); nesse caso resuma o que dá pra ver e diga com emoji o que não deu pra saber 🤷. Só diga que não há dados suficientes quando a evidência estiver realmente vazia (zero mensagens). Nunca invente nomes, números ou fatos. Identificadores técnicos (jids como "123@lid"/"456@s.whatsapp.net" ou sequências numéricas longas) são internos: NUNCA os repita na resposta; refira-se às pessoas só pelo nome, ou "a pessoa"/"pessoa A, B" quando o nome for desconhecido. Você só responde perguntas, nunca executa ações.';
 
 function usage(prefix) {
     return `🕵️ *!aidono — IA do dono*\n\n` +
@@ -151,30 +151,93 @@ module.exports = {
                 return await reactStatus(sock, m, from, false, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
             }
 
-            const maxPromptLength = Number(config?.aiMaxPromptLength) || 2000;
-            const qShort = question.slice(0, 500);
+            const maxPromptLength = Number(config?.aiMaxPromptLength) || 8000;
+            const qShort = question.slice(0, 800);
             // Janela de tempo ("há 3 dias", "ontem"): responde com as falas da
             // janela, direto do histórico de 7 dias (fast-path, sem IA).
             // Comparação ("ontem tem a ver com hoje?"): duas janelas curtas
             // fundidas p/ a IA julgar (fast-path nunca julga).
             const cmpRanges = rangesForComparison(question);
             const timeRange = cmpRanges ? cmpRanges[0] : extractTimeRange(question);
-            // Encolhe evidência até caber no teto (mantém as msgs mais novas).
-            // Comparação usa janelas curtas (6→2); normal começa folgado (14).
+            // Build ÚNICO (antes eram até 4 rebuilds [14,10,6,3] que varriam o
+            // banco 4x com muito dado). Se estourar o teto, corta o texto
+            // mantendo as linhas mais novas — sem re-consultar o SQLite.
+            const fitBudget = (text) => OWNER_SYSTEM.length + text.length + qShort.length + 60 <= maxPromptLength;
             let evidence = null;
             if (cmpRanges && (targets.people.length > 0 || targets.groups.length > 0)) {
-                for (const lim of [6, 4, 2]) {
-                    evidence = await buildComparisonEvidence(sock, targets, { from, isGroup, utils, question, ranges: cmpRanges, msgLimit: lim });
-                    const total = OWNER_SYSTEM.length + evidence.text.length + qShort.length + 60;
-                    if (total <= maxPromptLength || lim === 2) break;
+                evidence = await buildComparisonEvidence(sock, targets, { from, isGroup, utils, question, ranges: cmpRanges, msgLimit: 12 });
+                if (!fitBudget(evidence.text)) {
+                    const budget = Math.max(500, maxPromptLength - OWNER_SYSTEM.length - qShort.length - 60);
+                    const lines = evidence.text.split('\n');
+                    let acc = 0;
+                    const kept = [];
+                    for (let i = lines.length - 1; i >= 0; i--) {
+                        acc += lines[i].length + 1;
+                        if (acc > budget) break;
+                        kept.unshift(lines[i]);
+                    }
+                    evidence = { ...evidence, text: kept.join('\n'), truncated: true };
                 }
             } else {
-                for (const lim of [14, 10, 6, 3]) {
-                    evidence = await buildEvidence(sock, targets, { from, isGroup, utils, msgLimit: lim, question, timeRange });
-                    const total = OWNER_SYSTEM.length + evidence.text.length + qShort.length + 60;
-                    if (total <= maxPromptLength || lim === 3) break;
+                // Perfil/resumão sem janela ("o que ela gosta?", "resume essa
+                // pessoa"): amostra maior e espalhada no período — não só as
+                // últimas. Linhas mais curtas p/ caber ~30 no mesmo teto.
+                const isProfile = !timeRange && wantsProfileSummary(question) && targets.people.length > 0;
+                evidence = await buildEvidence(sock, targets, {
+                    from, isGroup, utils,
+                    msgLimit: isProfile ? 30 : 20,
+                    msgChars: isProfile ? 160 : 220,
+                    groupMsgChars: 180, question, timeRange
+                });
+                if (!fitBudget(evidence.text)) {
+                    const budget = Math.max(500, maxPromptLength - OWNER_SYSTEM.length - qShort.length - 60);
+                    const sampled = (evidence.stats?.people || []).some((p) => p.sampled);
+                    if (sampled) {
+                        // Thin distribuído: mantém cabeçalhos e afina as linhas
+                        // de mensagem de forma espaçada (não só as mais novas,
+                        // senão o resumão vira "recente" de novo).
+                        const lines = evidence.text.split('\n');
+                        const header = lines.filter((l) => !l.startsWith('  ['));
+                        const msgs = lines.filter((l) => l.startsWith('  ['));
+                        const headerLen = header.join('\n').length + 1;
+                        let keep = msgs;
+                        // reduz espaçadamente até caber (passo simples e seguro)
+                        while (keep.length > 5 && (headerLen + keep.join('\n').length) > budget) {
+                            keep = keep.filter((_, i) => i % 2 === 0);
+                        }
+                        // se ainda estourar, corta do meio (mantém início e fim)
+                        if ((headerLen + keep.join('\n').length) > budget && keep.length > 5) {
+                            let acc = headerLen;
+                            const out = [];
+                            const half = Math.ceil(keep.length / 2);
+                            const first = keep.slice(0, half);
+                            const last = keep.slice(half);
+                            for (const l of first) {
+                                if (acc + l.length + 1 > budget) break;
+                                out.push(l); acc += l.length + 1;
+                            }
+                            const tail = [];
+                            for (let i = last.length - 1; i >= 0; i--) {
+                                if (acc + last[i].length + 1 > budget) break;
+                                tail.unshift(last[i]); acc += last[i].length + 1;
+                            }
+                            keep = [...out, ...tail];
+                        }
+                        evidence = { ...evidence, text: [...header, ...keep].join('\n'), truncated: true };
+                    } else {
+                        const lines = evidence.text.split('\n');
+                        let acc = 0;
+                        const kept = [];
+                        for (let i = lines.length - 1; i >= 0; i--) {
+                            acc += lines[i].length + 1;
+                            if (acc > budget) break;
+                            kept.unshift(lines[i]);
+                        }
+                        evidence = { ...evidence, text: kept.join('\n'), truncated: true };
+                    }
                 }
             }
+            try { log?.('aidono evidencia', `${evidence.text.length} chars${evidence.truncated ? ' (cortada p/ teto)' : ''} windowTotal=${JSON.stringify((evidence.stats?.people || []).map((p) => p.windowTotal))}`); } catch (_) {}
             if (!evidence.text || evidenceIsEmpty(evidence.stats)) {
                 const who = (evidence.stats?.people || []).map((p) => p.label).filter(Boolean).join(', ');
                 const win = cmpRanges ? ` ${cmpRanges[0].label} × ${cmpRanges[1].label}` : (timeRange ? ` ${timeRange.label}` : '');

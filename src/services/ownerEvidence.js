@@ -307,7 +307,7 @@ function rangesForComparison(question, nowMs) {
     return [all[0], today];
 }
 
-async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, msgLimit = 15, msgChars = 150, groupMsgChars = 130, question = '', timeRange = null }) {
+async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, msgLimit = 20, msgChars = 220, groupMsgChars = 180, question = '', timeRange = null }) {
     const lines = [];
     const stats = { people: [], groups: [], logs: null, timeRange: timeRange ? timeRange.label : null };
     const tr = timeRange || null;
@@ -380,12 +380,19 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
         return authorTags.get(key);
     };
 
+    // Sem janela de tempo + pergunta de perfil/resumão: amostra ESPALHADA
+    // no período todo (não só as últimas). Ex.: "o que ela gosta?" precisa
+    // ver meses de conversa, não as 3 últimas msgs.
+    const profileMode = !tr && wantsProfileSummary(question) && people.length > 0;
+
     for (const [pi, p] of people.entries()) {
         // Fetch folgado e fixo (independe do msgLimit de exibição): conta
         // honesta + dedupe bom; a exibição continua curta (msgLimit/~12).
+        // Em modo perfil busca o teto (100) p/ amostrar o período todo.
+        const exactLim = profileMode ? 100 : 30;
         let msgs = (tr && utils?.getMessagesBySenderRange)
             ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 50) || [])
-            : (utils?.getMessagesBySender?.(p.jid, p.alias, 30) || []);
+            : (utils?.getMessagesBySender?.(p.jid, p.alias, exactLim) || []);
         // Linhas sem texto (mídia sem legenda) não viram evidência: a IA
         // receberia "1 msgs" sem nenhuma linha e responderia no vazio.
         // O nome delas ainda vale para o rótulo.
@@ -427,7 +434,7 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
                         // usa o jid real da linha (o escopo nulo mistura grupos)
                         for (const r of extra) collected.push({ gj: r.jid || gj, r });
                     }
-                    if (collected.length >= 200) break;
+                    if (collected.length >= (profileMode ? 400 : 200)) break;
                 }
                 // Filtro temporal p/ o caminho aproximado (LIKE sem SQL de data).
                 let pool = collected;
@@ -490,20 +497,33 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
             : '';
         // Com janela de tempo: conta a janela toda, exibe só o necessário.
         // msgs já é a fusão exato+aproximado com dedupe.
+        // Modo perfil: amostra distribuída no período (antigas→recentes).
         const windowTotal = msgs.length;
-        const showLim = tr ? Math.min(msgLimit, 12) : msgLimit;
-        const shown = tr ? msgs.slice(-showLim) : msgs.slice(-msgLimit);
-        const winTag = tr ? ` ${tr.label}` : ' recentes';
-        const cutNote = (tr && windowTotal > shown.length) ? ` (mostrando as ${shown.length} mais recentes)` : '';
+        const showLim = tr ? Math.min(msgLimit, 20) : (profileMode ? Math.min(Math.max(msgLimit, 30), 35) : msgLimit);
+        let shown;
+        let sampledNote = '';
+        let periodTag = '';
+        if (profileMode && windowTotal > showLim) {
+            const span = spanLabel(msgs);
+            shown = sampleDiverse(msgs, showLim);
+            if (span) periodTag = ` período ${span}`;
+            sampledNote = ` (amostra distribuída ${shown.length} de ${windowTotal}${periodTag})`;
+        } else {
+            shown = tr ? msgs.slice(-showLim) : msgs.slice(-showLim);
+        }
+        const winTag = tr ? ` ${tr.label}` : (profileMode ? ' no histórico todo' : ' recentes');
+        const cutNote = profileMode
+            ? sampledNote
+            : ((tr && windowTotal > shown.length) ? ` (mostrando as ${shown.length} mais recentes)` : ((!tr && windowTotal > shown.length) ? ` (mostrando as ${shown.length} mais recentes de ${windowTotal})` : ''));
         const mediaNote = (msgs.length === 0 && mediaOnly > 0)
             ? ` (só ${mediaOnly} mídia sem texto)`
             : '';
-        lines.push(`Pessoa: ${clean(label, 30)} — advs: ${advParts.length ? advParts.join(', ') : 'nenhuma'} — ${windowTotal} msgs${winTag}${approx ? ' (aproximado por nome)' : ''}${cutNote}${presenceNote}${mediaNote}:`);
+        lines.push(`Pessoa: ${clean(label, 30)} — advs: ${advParts.length ? advParts.join(', ') : 'nenhuma'} — ${windowTotal} msgs${where}${winTag}${approx ? ' (aproximado por nome)' : ''}${cutNote}${presenceNote}${mediaNote}:`);
         for (const ml of shown) {
             const txt = clean(ml.text, msgChars);
             if (txt) lines.push(`  [${fmtWhen(ml.timestamp)}] ${txt}`);
         }
-        stats.people.push({ jid: p.jid, label, advs: advParts, msgCount: shown.length, windowTotal, mediaOnly, approx, groups: msgGroups, presence, windowMsgs: tr ? shown.map((x) => ({ text: clean(x.text, 150), timestamp: x.timestamp, name: clean(x.name || '', 25) })) : undefined });
+        stats.people.push({ jid: p.jid, label, advs: advParts, msgCount: shown.length, windowTotal, mediaOnly, approx, groups: msgGroups, presence, profileMode: !!profileMode, sampled: !!(profileMode && windowTotal > shown.length), windowMsgs: tr ? shown.map((x) => ({ text: clean(x.text, 150), timestamp: x.timestamp, name: clean(x.name || '', 25) })) : undefined });
         resoParts.push(isTagLabel(label) ? `${label} (nome não confirmado)` : `${label} (identidade confirmada pelo bot)`);
     }
 
@@ -589,16 +609,16 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
         lines.unshift(`Janela da pergunta: ${tr.label} (${retention}).`);
     }
 
-    const text = lines.join('\n').slice(0, 2800);
+    const text = lines.join('\n').slice(0, 6500);
     return { text, stats };
 }
 
 // Comparação entre 2 janelas ("ontem × hoje"): roda a evidência de cada uma
 // (curta, p/ caber no prompt) e funde. O julgamento vai para a IA.
-async function buildComparisonEvidence(sock, targets, { from, isGroup, utils, question = '', ranges, msgLimit = 6 }) {
+async function buildComparisonEvidence(sock, targets, { from, isGroup, utils, question = '', ranges, msgLimit = 12 }) {
     const [r1, r2] = ranges;
-    const e1 = await buildEvidence(sock, targets, { from, isGroup, utils, msgLimit, msgChars: 120, groupMsgChars: 100, question, timeRange: r1 });
-    const e2 = await buildEvidence(sock, targets, { from, isGroup, utils, msgLimit, msgChars: 120, groupMsgChars: 100, question, timeRange: r2 });
+    const e1 = await buildEvidence(sock, targets, { from, isGroup, utils, msgLimit, msgChars: 180, groupMsgChars: 150, question, timeRange: r1 });
+    const e2 = await buildEvidence(sock, targets, { from, isGroup, utils, msgLimit, msgChars: 180, groupMsgChars: 150, question, timeRange: r2 });
     const text = `=== JANELA 1: ${r1.label} ===\n${e1.text}\n\n=== JANELA 2: ${r2.label} ===\n${e2.text}`;
     const mergePeople = new Map();
     for (const p of [...(e1.stats.people || []), ...(e2.stats.people || [])]) {
@@ -639,6 +659,49 @@ function evidenceIsEmpty(stats) {
     const logsEmpty = !stats.logs || (((stats.logs.errors || []).length === 0) && ((stats.logs.commands || []).length === 0));
     const hasTargets = (stats.people || []).length > 0 || (stats.groups || []).length > 0;
     return hasTargets ? (peopleEmpty && groupsEmpty && logsEmpty) : logsEmpty;
+}
+
+// Pergunta de perfil/resumão ("o que ela gosta?", "resume essa pessoa",
+// "quem é?", "o que acha dele?"): precisa de amostra ESPALHADA no tempo,
+// não só das últimas N. Sem isso a IA resume só o recente (ex.: 3 msgs).
+function wantsProfileSummary(question) {
+    const q = String(question || '').toLowerCase();
+    return /(gost[aoe]|gosto|prefer|hobby|hobbies|hobbie|torce|torcedor|time\b|comida|m[úu]sica|filme|s[ée]rie|jogo|trabalh|profiss|faz da vida|mora|idade|anivers|resume|resum[ãa]o|perfil|personalidade|quem [ée]|fale sobre|descrev|caracter|jeito|tom|personal|assunto.*(fala|recorrente)|sobre (ele|ela)|costuma|vive falando|temas?|acha|acham|opini|pensa|caracteriza|resumo)/.test(q);
+}
+
+// Amostra distribuída no tempo: pega N msgs espaçadas do início ao fim
+// (cronológicas) em vez de só as N mais recentes. Garante que a última
+// (mais recente) sempre entra. Preserva ordem cronológica.
+function sampleDiverse(msgs, target) {
+    const list = Array.isArray(msgs) ? msgs : [];
+    const n = Math.max(1, Math.min(40, Number(target) || 30));
+    if (list.length <= n) return list;
+    const out = [];
+    const step = list.length / n;
+    for (let i = 0; i < n - 1; i++) {
+        out.push(list[Math.floor(i * step)]);
+    }
+    out.push(list[list.length - 1]);
+    out.sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+    // dedupe por segurança (mesmo objeto pode repetir em borda)
+    const seen = new Set();
+    return out.filter((x) => {
+        const k = mergeKey(x?.text, x?.timestamp);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+}
+
+function spanLabel(msgs) {
+    try {
+        if (!msgs || msgs.length === 0) return null;
+        const t0 = Number(msgs[0].timestamp) || 0;
+        const t1 = Number(msgs[msgs.length - 1].timestamp) || 0;
+        if (!t0 || !t1) return null;
+        const f = (ms) => new Date(Number(ms)).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' });
+        return `${f(t0)}→${f(t1)}`;
+    } catch (_) { return null; }
 }
 
 // Pergunta factual sobre falas ("o que X falou ontem") x opinião ("o que acha").
@@ -744,4 +807,4 @@ function matchFactual(question, evidence, { isGroup, from, utils } = {}) {
     return null;
 }
 
-module.exports = { resolveTargets, resolveAlias, buildEvidence, buildComparisonEvidence, matchFactual, clean, warningsOf, wantsLogs, wantsSpoken, isComparison, extractTimeRange, extractAllTimeRanges, rangesForComparison, mergeMsgLists, safePersonLabel, personTag, displayName, jidFromDigits, digitsOf, evidenceIsEmpty };
+module.exports = { resolveTargets, resolveAlias, buildEvidence, buildComparisonEvidence, matchFactual, clean, warningsOf, wantsLogs, wantsSpoken, wantsProfileSummary, sampleDiverse, isComparison, extractTimeRange, extractAllTimeRanges, rangesForComparison, mergeMsgLists, safePersonLabel, personTag, displayName, jidFromDigits, digitsOf, evidenceIsEmpty };

@@ -15,7 +15,7 @@ module.exports = {
             let prompt = fullArgsText;
             const quotedInfo = m.message.extendedTextMessage?.contextInfo;
             const quotedMsg = quotedInfo?.quotedMessage;
-            const maxPromptLength = Number(config?.aiMaxPromptLength) || 2000;
+            const maxPromptLength = Number(config?.aiMaxPromptLength) || 8000;
 
             if (quotedMsg) {
                 const quotedText = getMessageText(quotedMsg);

@@ -750,7 +750,7 @@ const DEFAULT_CONFIG = {
     aiModel: "deepseek/deepseek-v4.1-flash:floor",
     aiMaxTokens: 1000,
     aiTemperature: 0.7,
-    aiMaxPromptLength: 2000,
+    aiMaxPromptLength: 8000,
     aiCacheTtl: 300000,
     aiRetryCount: 2,
     transcribeModel: 'openai/whisper-1',

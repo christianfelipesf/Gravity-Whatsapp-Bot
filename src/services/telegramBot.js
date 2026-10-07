@@ -130,12 +130,42 @@ async function downloadTelegramFile(fileId) {
 
 // Confirmação em 2 passos p/ broadcast (anti-ban): 1ª chamada mostra
 // contagem + ETA e pede /broadcast confirmar; 2ª executa com delay seguro.
-const _pendingBroadcast = new Map(); // chatId -> { kind:'text'|'image', text, imgBuf, expiresAt }
+const _pendingBroadcast = new Map(); // chatId -> { kind:'text'|'image', text, imgBuf, expiresAt, id }
 const BROADCAST_CONFIRM_MS = 5 * 60 * 1000;
 
 // Pendência do /update confirmar (uma por vez, expira em 5 min).
 let _pendingUpdate = null;
 const UPDATE_CONFIRM_MS = 5 * 60 * 1000;
+
+// Menus spawnados antigos: botões inline antigos continuam "vivos" no
+// histórico do chat. Comandos sem estado (/status, /qr, /logs...) são seguros
+// (só re-executam o estado atual). Já os "confirmar" (broadcast/limparmortos/
+// update) usam pendência em memória com expiração de 5 min + id anti-stale:
+// o botão carrega o id (`/broadcast confirmar <id>`); se o clique vier de um
+// menu antigo (id ausente/divergente), nada é executado — só avisa p/ gerar
+// um menu novo. Sem isso, um botão velho poderia confirmar uma pendência NOVA
+// com texto diferente (cross-confirm).
+function _newConfirmId() {
+    try { return Date.now().toString(36).slice(-6); } catch (_) { return String(Math.floor(Math.random() * 1e6)); }
+}
+function _confirmIdMismatch(pendId, argId) {
+    if (!pendId) return false; // pendência legada (sem id): aceita p/ compat
+    if (!argId) return true; // clique de menu antigo (sem id) vs pendência nova
+    return String(argId).toLowerCase() !== String(pendId).toLowerCase();
+}
+// Tenta desarmar os botões da mensagem que originou o clique (best-effort).
+// Evita duplo-clique e deixa claro que aquele menu já foi usado.
+async function _disarmButtons(chatId, messageId) {
+    const api = _getApi();
+    if (!api || !chatId || !messageId) return;
+    try {
+        await api.post('/editMessageReplyMarkup', {
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: { inline_keyboard: [] }
+        });
+    } catch (_) {}
+}
 
 // Ponte WhatsApp→Telegram: executa um comando de src/commands/ como se o
 // dono tivesse digitado no chat. Reaproveita validações e regras sem duplicar.
@@ -201,7 +231,7 @@ async function runWaCommand(chatId, name, argStr) {
 }
 
 // Pendência do /limparmortos confirmar (uma por vez, expira em 5 min).
-let _pendingPurge = null;
+let _pendingPurge = null; // { jids, expiresAt, id, chatId }
 const PURGE_CONFIRM_MS = 5 * 60 * 1000;
 
 async function fanOutBroadcast(chatId, makePayload, label) {
@@ -244,6 +274,9 @@ async function fanOutBroadcast(chatId, makePayload, label) {
 async function handleUpdate(update) {
     // Clique em botão inline: equivale a digitar o comando (data "cmd:/status").
     // Reaproveita o roteador de texto via mensagem sintética (profundidade 1).
+    // Menus antigos: o histórico mantém botões "vivos". Stateless (/status, /qr…)
+    // só re-executa o estado atual (seguro). Confirms carregam id anti-stale
+    // e são validados no handler de texto (menu velho ≠ pendência nova).
     if (update.callback_query) {
         const cq = update.callback_query;
         const cqChatId = cq.message?.chat?.id;
@@ -254,7 +287,8 @@ async function handleUpdate(update) {
         const fakeText = data.slice(4).trim();
         if (!fakeText) return;
         return handleUpdate({
-            message: { chat: { id: cqChatId }, text: fakeText, from: cq.from, message_id: cq.message?.message_id },
+            message: { chat: { id: cqChatId }, text: fakeText, from: cq.from, message_id: cq.message?.message_id,
+                _tgInlineMessageId: cq.message?.message_id || null },
             update_id: update.update_id
         });
     }
@@ -280,9 +314,11 @@ async function handleUpdate(update) {
         }
         const spaceIdx = caption.indexOf(' ');
         const legenda = spaceIdx === -1 ? '' : caption.slice(spaceIdx + 1).trim();
-        if (legenda.toLowerCase() === 'confirmar') {
+        if (legenda.toLowerCase() === 'confirmar' || legenda.toLowerCase().startsWith('confirmar ')) {
+            const argId = legenda.split(/\s+/)[1] || null;
             const pend = _pendingBroadcast.get(String(chatId));
             if (!pend || Date.now() > pend.expiresAt) { await send(chatId, `⚠️ Nada pendente. Envie a foto com \`/broadcast <texto>\` primeiro.`); return; }
+            if (_confirmIdMismatch(pend.id, argId)) { await send(chatId, `⚠️ Esse botão é de um menu antigo e expirou. Envie a foto com \`/broadcast <texto>\` de novo para gerar um menu novo.`); return; }
             _pendingBroadcast.delete(String(chatId));
             const buf = pend.imgBuf;
             await fanOutBroadcast(chatId, () => (pend.text ? { image: buf, caption: pend.text } : { image: buf }), 'com imagem ');
@@ -297,13 +333,14 @@ async function handleUpdate(update) {
             const cfg = utils.readConfig();
             const targets = await safe.resolveBroadcastTargets(global.__baileysSock);
             const n = targets.groups.length;
-            _pendingBroadcast.set(String(chatId), { kind: 'image', text: legenda, imgBuf: dl.buffer, expiresAt: Date.now() + BROADCAST_CONFIRM_MS });
+            const imgConfirmId = _newConfirmId();
+            _pendingBroadcast.set(String(chatId), { kind: 'image', text: legenda, imgBuf: dl.buffer, expiresAt: Date.now() + BROADCAST_CONFIRM_MS, id: imgConfirmId });
             await send(chatId,
                 `⚠️ *CONFIRMAR BROADCAST COM IMAGEM*\n` +
                 `📢 ${n} grupo(s) válido(s) (${targets.activeCount} ativos + ${targets.partialCount} parciais) • ~${safe.formatEta(safe.estimateTotal(n, cfg))}\n` +
                 (targets.pruned.length ? `🧹 ${targets.pruned.length} morto(s) podado(s)\n` : ``) +
                 `❗ Envio em massa pode gerar *ban temporário*.\n` +
-                `Confirme com foto+legenda \`/broadcast confirmar\` (5 min).`);
+                `Confirme com foto+legenda \`/broadcast confirmar ${imgConfirmId}\` (5 min).`);
         } catch (e) { await send(chatId, `❌ Erro: ${e.message}`); }
         return;
     }
@@ -314,8 +351,10 @@ async function handleUpdate(update) {
     const lower = text.toLowerCase();
     const args = text.split(/\s+/).slice(1);
 
-    // /help /start — menu clicável (botões equivalem a digitar o comando)
-    if (lower === '/start' || lower === '/help' || lower.startsWith('/help ')) {
+    // /menu /help /start — painel clicável (botões equivalem a digitar o comando).
+    // /menu é alias do painel no Telegram (hábito do WhatsApp).
+    if (lower === '/start' || lower === '/help' || lower.startsWith('/help ')
+        || lower === '/menu' || lower.startsWith('/menu ')) {
         const help = [
             `*🤖 Gravity Bot — Painel Telegram*`,
             ``,
@@ -435,7 +474,7 @@ async function handleUpdate(update) {
             await send(chatId, txt, {
                 buttons: [
                     [{ text: '🔄 Atualizar', data: 'cmd:/status' }, { text: '📜 Logs', data: 'cmd:/logs' }],
-                    [{ text: '🏠 Menu', data: 'cmd:/help' }]
+                    [{ text: '🏠 Menu', data: 'cmd:/menu' }]
                 ]
             });
         } catch (e) { await send(chatId, `❌ Erro status: ${e.message}`); }
@@ -503,10 +542,13 @@ async function handleUpdate(update) {
         const broadcastText = text.slice(text.indexOf(' ') + 1).trim();
         if (!broadcastText) { await send(chatId, `❌ Uso: \`/broadcast <texto>\``); return; }
         try {
-            if (broadcastText.toLowerCase() === 'confirmar') {
+            if (broadcastText.toLowerCase() === 'confirmar' || broadcastText.toLowerCase().startsWith('confirmar ')) {
+                const argId = broadcastText.split(/\s+/)[1] || null;
                 const pend = _pendingBroadcast.get(String(chatId));
                 if (!pend || Date.now() > pend.expiresAt) { await send(chatId, `⚠️ Nada pendente. Use \`/broadcast <texto>\` primeiro.`); return; }
+                if (_confirmIdMismatch(pend.id, argId)) { await send(chatId, `⚠️ Esse botão é de um menu antigo e expirou. Rode \`/broadcast <texto>\` de novo para gerar um menu novo.`); return; }
                 _pendingBroadcast.delete(String(chatId));
+                await _disarmButtons(chatId, msg._tgInlineMessageId);
                 await fanOutBroadcast(chatId, () => ({ text: pend.text }));
                 return;
             }
@@ -516,15 +558,16 @@ async function handleUpdate(update) {
             const targets = await safe.resolveBroadcastTargets(global.__baileysSock);
             const n = targets.groups.length;
             if (!n) { await send(chatId, `⚠️ Nenhum grupo válido (bot dentro + ativo/parcial)`); return; }
-            _pendingBroadcast.set(String(chatId), { kind: 'text', text: broadcastText, expiresAt: Date.now() + BROADCAST_CONFIRM_MS });
+            const bcId = _newConfirmId();
+            _pendingBroadcast.set(String(chatId), { kind: 'text', text: broadcastText, expiresAt: Date.now() + BROADCAST_CONFIRM_MS, id: bcId });
             await send(chatId,
                 `⚠️ *CONFIRMAR BROADCAST*\n` +
                 `📢 ${n} grupo(s) válido(s) (${targets.activeCount} ativos + ${targets.partialCount} parciais) • ~${safe.formatEta(safe.estimateTotal(n, cfg))} (devagar p/ evitar ban)\n` +
                 (targets.pruned.length ? `🧹 ${targets.pruned.length} morto(s) podado(s)\n` : ``) +
                 `📝 \`${broadcastText.slice(0, 200)}\`\n\n` +
                 `❗ Envio em massa idêntico é o que causa *ban temporário*.\n` +
-                `Toque em ✅ ou digite \`/broadcast confirmar\` (5 min).`,
-                { buttons: [[{ text: '✅ Confirmar envio', data: 'cmd:/broadcast confirmar' }]] });
+                `Toque em ✅ ou digite \`/broadcast confirmar ${bcId}\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar envio', data: `cmd:/broadcast confirmar ${bcId}` }]] });
         } catch (e) { await send(chatId, `❌ Erro broadcast: ${e.message}`); }
         return;
     }
@@ -565,12 +608,16 @@ async function handleUpdate(update) {
             const utils = require('../database/utils');
             const sub = String(args[0] || '').toLowerCase();
             if (sub === 'confirmar') {
+                const argId = String(args[1] || '').toLowerCase() || null;
                 const pend = _pendingPurge;
-                _pendingPurge = null;
                 if (!pend || Date.now() > pend.expiresAt) {
+                    _pendingPurge = null;
                     await send(chatId, `⚠️ Nada pendente (ou expirou). Rode /limparmortos de novo para varrer.`);
                     return;
                 }
+                if (_confirmIdMismatch(pend.id, argId)) { await send(chatId, `⚠️ Esse botão é de um menu antigo e expirou. Rode \`/limparmortos\` de novo para gerar um menu novo.`); return; }
+                _pendingPurge = null;
+                await _disarmButtons(chatId, msg._tgInlineMessageId);
                 let purged = 0;
                 let logs = 0;
                 const lines = [];
@@ -613,14 +660,15 @@ async function handleUpdate(update) {
                 try { if (utils.isNewsEnabled(j)) f.push('news'); } catch (_) {}
                 return f.length ? ` [${f.join('/')}]` : '';
             };
-            _pendingPurge = { jids: dead, expiresAt: Date.now() + PURGE_CONFIRM_MS };
+            const purgeId = _newConfirmId();
+            _pendingPurge = { jids: dead, expiresAt: Date.now() + PURGE_CONFIRM_MS, id: purgeId, chatId: String(chatId) };
             await send(chatId,
                 `*🧹 Grupos mortos* (${dead.length} — bot fora, dados no banco):\n\n` +
                 dead.slice(0, 30).map((j) => `• \`${j.split('@')[0]}\`${flags(j)}`).join('\n') +
                 (dead.length > 30 ? `\n…(+${dead.length - 30})` : '') +
                 `\n\n⚠️ A purga apaga ativação, news, dashboard, rank, logs e mensagens (irreversível).` +
-                `\nToque em ✅ ou digite \`/limparmortos confirmar\` (5 min).`,
-                { buttons: [[{ text: '✅ Confirmar purga', data: 'cmd:/limparmortos confirmar' }]] });
+                `\nToque em ✅ ou digite \`/limparmortos confirmar ${purgeId}\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar purga', data: `cmd:/limparmortos confirmar ${purgeId}` }]] });
         } catch (e) { await send(chatId, `❌ Erro limparmortos: ${e.message}`); }
         return;
     }
@@ -682,12 +730,16 @@ async function handleUpdate(update) {
         try {
             const sub = String(args[0] || '').toLowerCase();
             if (sub === 'confirmar') {
+                const argId = String(args[1] || '').toLowerCase() || null;
                 const pend = _pendingUpdate;
-                _pendingUpdate = null;
                 if (!pend || Date.now() > pend.expiresAt) {
+                    _pendingUpdate = null;
                     await send(chatId, `⚠️ Nada pendente (ou expirou). Rode /update de novo.`);
                     return;
                 }
+                if (_confirmIdMismatch(pend.id, argId)) { await send(chatId, `⚠️ Esse botão é de um menu antigo e expirou. Rode \`/update\` de novo para gerar um menu novo.`); return; }
+                _pendingUpdate = null;
+                await _disarmButtons(chatId, msg._tgInlineMessageId);
                 await send(chatId, `⬇️ *Atualizando...* (git pull + restart)`);
                 await runWaCommand(chatId, 'update', '');
                 return;
@@ -699,17 +751,18 @@ async function handleUpdate(update) {
                 const subj = execFileSync('git', ['log', '-1', '--pretty=%s'], { windowsHide: true }).toString().trim().slice(0, 80);
                 if (short) cur = `\`${short}\` ${subj}`;
             } catch (_) {}
-            _pendingUpdate = { expiresAt: Date.now() + UPDATE_CONFIRM_MS };
+            const updId = _newConfirmId();
+            _pendingUpdate = { expiresAt: Date.now() + UPDATE_CONFIRM_MS, id: updId, chatId: String(chatId) };
             await send(chatId,
                 `*🔄 Update*\n\n📌 Atual: ${cur}\n\nVai rodar \`git pull\` + reiniciar (segundos fora do ar).\n` +
-                `Toque em ✅ ou digite \`/update confirmar\` (5 min).`,
-                { buttons: [[{ text: '✅ Confirmar update', data: 'cmd:/update confirmar' }]] });
+                `Toque em ✅ ou digite \`/update confirmar ${updId}\` (5 min).`,
+                { buttons: [[{ text: '✅ Confirmar update', data: `cmd:/update confirmar ${updId}` }]] });
         } catch (e) { await send(chatId, `❌ Erro update: ${e.message}`); }
         return;
     }
 
     // fallback: eco help
-    await send(chatId, `❓ Comando desconhecido: \`${text.slice(0,40)}\`\nUse /help`);
+    await send(chatId, `❓ Comando desconhecido: \`${text.slice(0,40)}\`\nUse /menu`);
 }
 
 async function pollOnce() {
@@ -755,7 +808,26 @@ function start(opts = {}) {
     if (_pollTimer.unref) _pollTimer.unref();
     // primeira chamada imediata
     pollOnce().catch(()=>{});
-    console.log(`🤖 [telegramBot] polling ativo → chat ${String(chat).slice(0,4)}**** cmds: /modo /banco /local /nuvem /restart /reconnect /qr /ativar /desativar /broadcast /logs /dump`);
+    // Sugestões de comandos no autocomplete do Telegram (best-effort).
+    try {
+        _api.post('/setMyCommands', { commands: [
+            { command: 'menu', description: 'Painel clicável' },
+            { command: 'status', description: 'Status do bot' },
+            { command: 'qr', description: 'Status do QR' },
+            { command: 'logs', description: 'Últimos logs' },
+            { command: 'grupos', description: 'Lista grupos' },
+            { command: 'broadcast', description: 'Envia p/ grupos (2 passos)' },
+            { command: 'limparmortos', description: 'Purga grupos mortos (2 passos)' },
+            { command: 'dump', description: 'Backup zip' },
+            { command: 'update', description: 'git pull + restart (2 passos)' },
+            { command: 'restart', description: 'Reinicia o bot' },
+            { command: 'reconnect', description: 'Força reconnect WS' },
+            { command: 'modo', description: 'Ver banco atual' },
+            { command: 'config', description: 'Ver config' },
+            { command: 'news', description: 'Feed global' }
+        ] }).catch(() => {});
+    } catch (_) {}
+    console.log(`🤖 [telegramBot] polling ativo → chat ${String(chat).slice(0,4)}**** cmds: /menu /modo /banco /local /nuvem /restart /reconnect /qr /ativar /desativar /broadcast /logs /dump`);
     return _pollTimer;
 }
 
