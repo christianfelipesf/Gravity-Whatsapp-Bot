@@ -1,4 +1,4 @@
-// ownerEvidence.js — evidências para o !aidono (somente leitura).
+// ownerEvidence.js — evidências para o !investigar / !investigartudo (somente leitura).
 // Resolve alvos (menções múltiplas, citado, número, nome de grupo) e monta
 // um pacote compacto de evidências (advs + mensagens recentes + atividade).
 // Tudo local (SQLite). matchFactual responde perguntas factuais sem IA (R$0).
@@ -109,7 +109,7 @@ function extractGroupNameMention(text, groupSubjects) {
     const m = t.match(/(?:grupo|gp)\s+([^?,!.]{2,60})/i);
     const candidates = [];
     if (m) candidates.push(m[1].trim());
-    // tenta também o texto todo como nome (ex.: "!aidono Amigos o que acha?")
+    // tenta também o texto todo como nome (ex.: "!investigar Amigos o que acha?")
     candidates.push(t.slice(0, 60).trim());
     const lower = (s) => String(s || '').toLowerCase();
     for (const cand of candidates) {
@@ -195,7 +195,7 @@ function wantsLogs(question) {
     return /log|erro|falha|bug|travou|parou|quebrou|comando\s+(rodou|execut|usou|foi)|quais comandos|últimos? erros?|erros? recentes?/i.test(String(question || ''));
 }
 
-// Janela de tempo em PT-BR p/ !aidono ("o que X falou há 3 dias/ontem").
+// Janela de tempo em PT-BR p/ !investigar ("o que X falou há 3 dias/ontem").
 // Tudo em America/Sao_Paulo (UTC-3 fixo, sem horário de verão desde 2019).
 // Retorna { since, until, label } em ms ou null.
 const SP_OFFSET_MS = 3 * 3600 * 1000;
@@ -386,12 +386,12 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
     const profileMode = !tr && wantsProfileSummary(question) && people.length > 0;
 
     for (const [pi, p] of people.entries()) {
-        // Fetch folgado e fixo (independe do msgLimit de exibição): conta
-        // honesta + dedupe bom; a exibição continua curta (msgLimit/~12).
-        // Em modo perfil busca o teto (100) p/ amostrar o período todo.
-        const exactLim = profileMode ? 100 : 30;
+        // Pool CHEIO (janela toda), exibição curta: busca até 2000 e amostra
+        // na hora de exibir — o teto de leitura antigo (30/100) cortava o
+        // histórico antes de amostrar e o "resumão" virava só o recente.
+        const exactLim = 2000;
         let msgs = (tr && utils?.getMessagesBySenderRange)
-            ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 50) || [])
+            ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 1000) || [])
             : (utils?.getMessagesBySender?.(p.jid, p.alias, exactLim) || []);
         // Linhas sem texto (mídia sem legenda) não viram evidência: a IA
         // receberia "1 msgs" sem nenhuma linha e responderia no vazio.
@@ -427,14 +427,14 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
                 for (const gj of scope) {
                     if (rangeFn) {
                         // Busca exata por nome COM janela de tempo (SQL).
-                        const extra = rangeFn(gj, pname, tr.since, tr.until, 100) || [];
+                        const extra = rangeFn(gj, pname, tr.since, tr.until, 1000) || [];
                         for (const r of extra) collected.push({ gj: r.jid || gj, r });
                     } else {
-                        const extra = likeFn?.call(utils, gj, pname, 100) || [];
+                        const extra = likeFn?.call(utils, gj, pname, 1000) || [];
                         // usa o jid real da linha (o escopo nulo mistura grupos)
                         for (const r of extra) collected.push({ gj: r.jid || gj, r });
                     }
-                    if (collected.length >= (profileMode ? 400 : 200)) break;
+                    if (collected.length >= (profileMode ? 2500 : 800)) break;
                 }
                 // Filtro temporal p/ o caminho aproximado (LIKE sem SQL de data).
                 let pool = collected;
@@ -528,16 +528,17 @@ async function buildEvidence(sock, { people, groups }, { from, isGroup, utils, m
     }
 
     for (const g of groups) {
+        // Pool cheio aqui também (exibição continua curta, gShow abaixo).
         let msgs = (tr && utils?.getMessagesByGroupRange)
-            ? (utils.getMessagesByGroupRange(g.jid, tr.since, tr.until, 30) || [])
-            : (utils?.getMessagesByGroup?.(g.jid, 20) || []);
+            ? (utils.getMessagesByGroupRange(g.jid, tr.since, tr.until, 1000) || [])
+            : (utils?.getMessagesByGroup?.(g.jid, 500) || []);
         // Fallback fundido com dedupe (mesmo motivo do loop de pessoas).
         try {
             let extra = [];
             if (tr && utils?.getGroupMessagesRange) {
-                extra = utils.getGroupMessagesRange(g.jid, tr.since, tr.until, 100) || [];
+                extra = utils.getGroupMessagesRange(g.jid, tr.since, tr.until, 1000) || [];
             } else {
-                const all = utils?.getGroupMessages?.(g.jid, 50) || [];
+                const all = utils?.getGroupMessages?.(g.jid, 500) || [];
                 extra = tr ? all.filter((r) => (r.time || 0) >= tr.since && (r.time || 0) <= tr.until) : all;
             }
             if (extra.length > 0) {

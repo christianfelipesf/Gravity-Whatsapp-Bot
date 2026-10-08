@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS dashboard_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_dashboard_logs_ts ON dashboard_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_dashboard_logs_to_jid ON dashboard_logs(to_jid, timestamp);
+CREATE INDEX IF NOT EXISTS idx_dashboard_logs_sender ON dashboard_logs(sender_jid, timestamp);
 CREATE INDEX IF NOT EXISTS idx_dashboard_logs_msgid ON dashboard_logs(message_id)
     WHERE message_id IS NOT NULL AND message_id <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dashboard_logs_msgid_unique
@@ -200,6 +201,8 @@ CREATE TABLE IF NOT EXISTS memes (
     sender_jid TEXT,
     sender_name TEXT,
     sender_phone TEXT,
+    group_jid TEXT,
+    group_name TEXT,
     created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memes_created ON memes(created_at DESC);

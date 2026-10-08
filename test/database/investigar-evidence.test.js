@@ -1,5 +1,5 @@
-// Fontes de evidência do !aidono contra banco TEMPORÁRIO (nunca toca no real).
-process.env.BOT_DB_PATH = require('path').join(require('os').tmpdir(), `bot-test-aidono-${process.pid}.db`);
+// Fontes de evidência do !investigar contra banco TEMPORÁRIO (nunca toca no real).
+process.env.BOT_DB_PATH = require('path').join(require('os').tmpdir(), `bot-test-investigar-${process.pid}.db`);
 
 const { describe, it, after } = require('node:test');
 const assert = require('node:assert');
@@ -8,7 +8,7 @@ const fs = require('fs');
 const u = require('../../src/database/utils');
 const ev = require('../../src/services/ownerEvidence');
 
-const G = 'testaidono@g.us';
+const G = 'testinvestigar@g.us';
 const JID = '999888777@lid';
 
 after(() => {
@@ -18,7 +18,7 @@ after(() => {
     }
 });
 
-describe('!aidono — fontes de evidência', () => {
+describe('!investigar — fontes de evidência', () => {
     it('findPeopleByName acha nome nos logs de ação (sem precisar de chat)', () => {
         u.insertDashboardLog({ type: 'action', group: 'G', text: 'Comando executado: !s', name: 'Mika', toJid: G, senderJid: JID, timestamp: Date.now() });
         const hits = u.findPeopleByName('mik', 5);

@@ -77,7 +77,7 @@ function recordMemeSend(groupJid, memeId) {
 
 // Salva buffer como jpg normalizado (sem crop — meme não pode ser cortado).
 // Retorna { row } ou { duplicate: row }.
-async function saveMeme(buffer, { senderJid = null, senderName = null, senderPhone = null } = {}) {
+async function saveMeme(buffer, { senderJid = null, senderName = null, senderPhone = null, groupJid = null, groupName = null } = {}) {
     if (!buffer || !buffer.length) throw new Error('Imagem vazia');
     if (buffer.length > MAX_BYTES) throw new Error('Imagem muito grande (max 5MB)');
     const hash = sha256(buffer);
@@ -90,8 +90,8 @@ async function saveMeme(buffer, { senderJid = null, senderName = null, senderPho
     await sharp(buffer, { failOn: 'none' }).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toFile(filePath);
     const now = Date.now();
     const info = _db().prepare(
-        'INSERT INTO memes (file_path, hash, sender_jid, sender_name, sender_phone, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(`uploads/${memeFileName(hash)}`, hash, senderJid, senderName, senderPhone, now);
+        'INSERT INTO memes (file_path, hash, sender_jid, sender_name, sender_phone, group_jid, group_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(`uploads/${memeFileName(hash)}`, hash, senderJid, senderName, senderPhone, groupJid, groupName, now);
     try { require('../database/supabaseSync').schedulePush(5000); } catch (_) {}
     return { row: getMemeById(Number(info.lastInsertRowid)) };
 }
@@ -133,12 +133,15 @@ function formatDateBR(ts) {
     } catch (_) { return '—'; }
 }
 
-// Legenda padrão: enviado por + grupo + data (pedido do dono).
-// Sem cabeçalho com ID — só as 3 linhas.
-function buildMemeCaption(meme, groupName) {
+// Legenda padrão: enviado por + grupo de ORIGEM + data.
+// Mostra onde o meme foi postado (nome do grupo ou "privado"),
+// não o grupo atual onde foi sorteado.
+// O 2º param é fallback p/ memes antigos sem origem salva.
+function buildMemeCaption(meme, fallbackGroupName) {
     const who = meme.sender_name || 'alguém';
     const phone = meme.sender_phone ? ` (${meme.sender_phone})` : '';
-    return `👤 *Enviado por:* ${who}${phone}\n👥 *Grupo:* ${groupName || '—'}\n📅 *Data:* ${formatDateBR(meme.created_at)}`;
+    const origin = meme.group_name || fallbackGroupName || '—';
+    return `👤 *Enviado por:* ${who}${phone}\n👥 *Grupo:* ${origin}\n📅 *Data:* ${formatDateBR(meme.created_at)}`;
 }
 
 // Telefone canônico a partir do sender + participantPn (cobre @lid).
@@ -157,16 +160,11 @@ function extractPhone(sender, m) {
     return null;
 }
 
-// Anti-spam do !meme por grupo: 1 sorteio a cada 30s (grupo tumultuado
-// inundava o chat com duplo-toque). Retorna ms restantes (0 = liberado).
+// Anti-spam do !meme por grupo DESATIVADO (pedido do dono: sem delay).
+// Mantido por compatibilidade — sempre liberado.
 const _memeGroupLast = new Map();
-const MEME_GROUP_COOLDOWN_MS = 30 * 1000;
+const MEME_GROUP_COOLDOWN_MS = 0;
 function checkMemeGroupCooldown(jid) {
-    if (!jid) return 0;
-    const now = Date.now();
-    const last = _memeGroupLast.get(jid) || 0;
-    if (now - last < MEME_GROUP_COOLDOWN_MS) return last + MEME_GROUP_COOLDOWN_MS - now;
-    _memeGroupLast.set(jid, now);
     return 0;
 }
 

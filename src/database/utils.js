@@ -397,7 +397,7 @@ async function resolveLidPhoneInGroup(sock, lidUser, groupJid) {
 }
 
 // Reverso: telefone -> LID via metadata do grupo. Cobre o caso em que a
-// pergunta cita o número mas o histórico está sob o @lid (!aidono achava
+// pergunta cita o número mas o histórico está sob o @lid (!investigar achava
 // "sem dados" mesmo com dezenas de mensagens). Retorna jid ou null.
 async function resolvePhoneLidInGroup(sock, phoneUser, groupJid) {
     if (!sock || !phoneUser || !groupJid) return null;
@@ -555,7 +555,9 @@ function removeSubOwner(phoneOrJid) {
 // ============================================================
 // Guardiões (!addguardiao / !remguardiao) — papel LIMITADO:
 // !ativar/!desativar/!ativarp/!desativarp, !news ativar/desativar,
-// !aidono e !autoresponder on/off. NUNCA !set/!config/chaves API (não passam em
+// !investigartudo, !autoresponder on/off, !mutar/!desmutar, !d (deletarmsg:
+// msg do próprio bot mesmo sem bot-admin, msg de terceiros exige bot-admin),
+// !redegravity, !statusgrupos e !menuguardiao. NUNCA !set/!config/chaves API (não passam em
 // canConfigureBot de propósito). Armazenado em config.guardioes.
 // Gerenciados pelo dono real E por sub-donos.
 // ============================================================
@@ -624,7 +626,8 @@ async function isGuardiaoSenderAsync(sock, m, sender, from) {
 
 // Portão do guardião: dono OU sub-dono OU guardião.
 // Usado SÓ em: !ativar/!desativar/!ativarp/!desativarp,
-// !news ativar/desativar, !aidono e !autoresponder. Nunca em !set/!config.
+// !news ativar/desativar, !investigartudo, !autoresponder, !mutar/!desmutar,
+// !d (deletarmsg), !redegravity, !statusgrupos e !menuguardiao. Nunca em !set/!config.
 async function canGuardianActAsync(sock, m, sender, from) {
     try {
         if (isBotOwner(sock, m, sender)) return { ok: true, owner: true, sub: false, guardiao: false };
@@ -735,8 +738,9 @@ const DEFAULT_CONFIG = {
     // Sub-donos: podem configurar variáveis do bot (!set, !config, etc),
     // mas NÃO gerenciam sub-donos (só o dono real). Números com DDI+DDD.
     subOwners: ['5598989138217'],
-    // Guardiões: papel limitado (só !ativar/!desativar/!ativarp/!desativarp,
-    // !news ativar/desativar e !aidono). Gerenciados pelo dono E por sub-donos
+    // Guardiões: papel limitado (!ativar/!desativar/!ativarp/!desativarp,
+    // !news, !investigartudo, !autoresponder, !mutar/!desmutar, !d, !redegravity,
+    // !statusgrupos, !menuguardiao). Gerenciados pelo dono E por sub-donos
     // via !addguardiao/!remguardiao (nunca via !set).
     guardioes: [],
     // Tema global (!temaglobal, dono+subdono): quando ativado, substitui
@@ -768,7 +772,7 @@ const DEFAULT_CONFIG = {
     channelName: "Canal Oficial 📢",
     dashboardEnabled: false,
     dashboardPort: 3000,
-    // --- Histórico (!aidono/!resumir) — NÃO tem vínculo com o painel web.
+    // --- Histórico (!investigar/!resumir) — NÃO tem vínculo com o painel web.
     // Chaves `dashboard*` abaixo são aliases legados (mantidos p/ !set antigo).
     historyMaxLogs: 100000,
     historyHours: 168,
@@ -854,7 +858,7 @@ function readConfig() {
     return { ...merged };
 }
 
-// Limites efetivos do histórico (fonte única p/ trim + !aidono).
+// Limites efetivos do histórico (fonte única p/ trim + !investigar).
 function getHistoryLimits() {
     try {
         const cfg = readConfig();
@@ -1034,7 +1038,7 @@ function deactivateGroup(jid) {
     try { _agpDelete.run(jid); } catch (_) {}
     try { _afDelete.run(jid); } catch (_) {}
     // TRAVA: histórico (messages/dashboard_logs) é PRESERVADO de propósito.
-    // !desativar só desliga o bot, não apaga resumos nem evidências do !aidono.
+    // !desativar só desliga o bot, não apaga resumos nem evidências do !investigar.
     // NUNCA chamar clearChatHistory() aqui (apagar é só via comando explícito
     // de limpeza, que propaga o delete p/ nuvem via _msgPendingCloudDelete).
     muteApi.clearMuted(jid);
@@ -1174,7 +1178,7 @@ function listPartialGroups() {
     try { return _agpList.all().map(r => r.jid); } catch (e) { return []; }
 }
 
-// Histórico (!aidono/!resumir) NÃO depende do painel: grava em todo grupo
+// Histórico (!investigar/!resumir) NÃO depende do painel: grava em todo grupo
 // ativo (total) ou parcial. O toggle do dashboard controla só o painel.
 function shouldRecordHistory(jid) {
     if (!jid || !String(jid).endsWith('@g.us')) return false;
@@ -1295,7 +1299,7 @@ const _dlSelectAllLimited = db.prepare(`SELECT type, grp, text, name, phone, med
 const _dlSelectByMessageId = db.prepare(`SELECT type, grp, text, name, phone, media_json, to_jid, message_id,
     sender_jid, from_me, hidden, ephemeral, quoted_json, reactions,
     time_label, timestamp FROM dashboard_logs WHERE message_id = ? LIMIT 1`);
-// Consultas estreitas para o !aidono: mensagens de uma pessoa ou de um grupo.
+// Consultas estreitas para o !investigar: mensagens de uma pessoa ou de um grupo.
 // Só type='chat' com texto (ignora logs de ação/sistema).
 const _dlBySender = db.prepare(`SELECT type, grp, text, name, phone, media_json, to_jid, message_id,
     sender_jid, from_me, hidden, ephemeral, quoted_json, reactions,
@@ -1308,7 +1312,7 @@ const _dlByGroup = db.prepare(`SELECT type, grp, text, name, phone, media_json, 
     time_label, timestamp FROM dashboard_logs
     WHERE type = 'chat' AND text IS NOT NULL AND text <> '' AND to_jid = ?
     ORDER BY timestamp DESC LIMIT ?`);
-// Logs do próprio bot (erros, ações, comandos) para o !aidono.
+// Logs do próprio bot (erros, ações, comandos) para o !investigar.
 const _dlLogsByType = db.prepare(`SELECT type, grp, text, name, phone, media_json, to_jid, message_id,
     sender_jid, from_me, hidden, ephemeral, quoted_json, reactions,
     time_label, timestamp FROM dashboard_logs
@@ -1381,7 +1385,9 @@ function getDashboardLogByMessageId(messageId) {
 // Retorna em ordem cronológica (mais antiga primeiro).
 function getMessagesBySender(senderJid, aliasJid, limit = 20) {
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+        // Teto alto (2000): o !investigar busca o pool cheio e amostra na
+        // exibição — o limite de leitura continua no chamador.
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 20));
         const rows = _dlBySender.all(senderJid || '', aliasJid || '', lim);
         return rows.map(_rowToLog).filter(Boolean).reverse();
     } catch (_) { return []; }
@@ -1391,14 +1397,14 @@ function getMessagesBySender(senderJid, aliasJid, limit = 20) {
 function getMessagesByGroup(jid, limit = 30) {
     if (!jid) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         const rows = _dlByGroup.all(jid, lim);
         return rows.map(_rowToLog).filter(Boolean).reverse();
     } catch (_) { return []; }
 }
 
 // Logs recentes do próprio bot por tipo ('error', 'action', ...). Cronológica.
-// Para o !aidono responder "quais erros deram?" / "que comandos rodaram?".
+// Para o !investigar responder "quais erros deram?" / "que comandos rodaram?".
 function getRecentLogs(type, limit = 15) {
     if (!type) return [];
     try {
@@ -1468,7 +1474,7 @@ function getMessagesByPushName(groupJid, pushName, limit = 20) {
     const pn = String(pushName || '').trim();
     if (!pn) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 20));
         return _msgByPush.all(groupJid || '', groupJid || '', pn, lim).reverse();
     } catch (_) { return []; }
 }
@@ -1478,7 +1484,7 @@ function findMessagesByNameLike(groupJid, pushName, limit = 20) {
     const pn = String(pushName || '').trim();
     if (!pn) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 20));
         const exact = _msgByPush.all(groupJid || '', groupJid || '', pn, lim);
         if (exact.length > 0) return exact.reverse();
         const tokens = pn.toLowerCase().replace(/^~\s*/, '').split(/[\s_.-]+/)
@@ -1498,13 +1504,13 @@ function findMessagesByNameLike(groupJid, pushName, limit = 20) {
 function getGroupMessages(jid, limit = 30) {
     if (!jid) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         return _msgByJid.all(jid, lim).reverse();
     } catch (_) { return []; }
 }
 
-// Janela de tempo p/ !aidono ("o que X falou há 3 dias"): mesmos índices,
-// só com filtro temporal. Limites modestos — o !aidono lê no máx ~14.
+// Janela de tempo p/ !investigar ("o que X falou há 3 dias"): mesmos índices,
+// só com filtro temporal. A exibição continua curta — o pool é cheio.
 const _dlBySenderRange = db.prepare(`SELECT type, grp, text, name, phone, media_json, to_jid, message_id,
     sender_jid, from_me, hidden, ephemeral, quoted_json, reactions,
     time_label, timestamp FROM dashboard_logs
@@ -1526,7 +1532,7 @@ const _msgByJidRange = db.prepare('SELECT push_name, text, time FROM messages WH
 
 function getMessagesBySenderRange(senderJid, aliasJid, since, until, limit = 30) {
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         const rows = _dlBySenderRange.all(senderJid || '', aliasJid || '', Number(since) || 0, Number(until) || Date.now(), lim);
         return rows.map(_rowToLog).filter(Boolean).reverse();
     } catch (_) { return []; }
@@ -1535,7 +1541,7 @@ function getMessagesBySenderRange(senderJid, aliasJid, since, until, limit = 30)
 function getMessagesByGroupRange(jid, since, until, limit = 30) {
     if (!jid) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         const rows = _dlByGroupRange.all(jid, Number(since) || 0, Number(until) || Date.now(), lim);
         return rows.map(_rowToLog).filter(Boolean).reverse();
     } catch (_) { return []; }
@@ -1545,7 +1551,7 @@ function getMessagesByPushNameRange(groupJid, pushName, since, until, limit = 30
     const pn = String(pushName || '').trim();
     if (!pn) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         return _msgByPushRange.all(groupJid || '', groupJid || '', pn, Number(since) || 0, Number(until) || Date.now(), lim).reverse();
     } catch (_) { return []; }
 }
@@ -1553,7 +1559,7 @@ function getMessagesByPushNameRange(groupJid, pushName, since, until, limit = 30
 function getGroupMessagesRange(jid, since, until, limit = 30) {
     if (!jid) return [];
     try {
-        const lim = Math.max(1, Math.min(100, Number(limit) || 30));
+        const lim = Math.max(1, Math.min(2000, Number(limit) || 30));
         return _msgByJidRange.all(jid, Number(since) || 0, Number(until) || Date.now(), lim).reverse();
     } catch (_) { return []; }
 }
@@ -1565,7 +1571,7 @@ function trimDashboardLogs({ maxAgeMs = 0, maxRows = 5000 } = {}) {
         if (maxRows > 0) {
             // Ruído (action/event/error) nunca pode expulsar conversa: apara o
             // não-chat primeiro (1/3 do teto), depois o teto global se ainda
-            // estourar. O !aidono lê no máx 14 msgs — retenção longa aqui não
+            // estourar. O !investigar amostra a exibição — retenção longa aqui não
             // pesa a leitura, só o disco.
             try { _dlTrimNonChatByCount.run(Math.max(100, Math.floor(Number(maxRows) / 3))); } catch (_) {}
             _dlTrimByCount.run(maxRows);
@@ -1577,7 +1583,7 @@ function trimDashboardLogs({ maxAgeMs = 0, maxRows = 5000 } = {}) {
 
 function countDashboardLogs() { try { return _dlCount.get().c; } catch (_) { return 0; } }
 
-// Janela real do histórico (p/ !aidono anunciar número honesto, não "7 dias" fixo).
+// Janela real do histórico (p/ !investigar anunciar número honesto, não "7 dias" fixo).
 function getHistoryStats() {
     try {
         const c = countDashboardLogs();
@@ -2699,6 +2705,44 @@ function getGroupAnalytics(jid, days = 7) {
 }
 
 // ============================================================
+// Métricas do dia (base do !statusgrupos) — BRT (America/Sao_Paulo)
+// ============================================================
+function getStartOfTodayBrtMs(now = Date.now()) {
+    try {
+        const parts = new Intl.DateTimeFormat('pt-BR', {
+            timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        }).formatToParts(new Date(now));
+        const get = (t) => parts.find(p => p.type === t)?.value || '00';
+        const elapsed = ((Number(get('hour')) || 0) * 3600 + (Number(get('minute')) || 0) * 60 + (Number(get('second')) || 0)) * 1000;
+        return now - elapsed;
+    } catch (_) {
+        const d = new Date(now);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+    }
+}
+
+// Mensagens de hoje no grupo (group_msg_stats, dia BRT YYYY-MM-DD).
+function getGroupMsgsToday(jid) {
+    if (!jid) return 0;
+    try {
+        const { day } = _analyticsDayHour(Date.now());
+        const r = db.prepare('SELECT COALESCE(SUM(count),0) as c FROM group_msg_stats WHERE jid = ? AND day = ?').get(jid, day);
+        return Number(r?.c) || 0;
+    } catch (_) { return 0; }
+}
+
+// Comandos executados hoje no grupo (dashboard_logs type=action "Comando executado:").
+function getGroupCommandsToday(jid) {
+    if (!jid) return 0;
+    try {
+        const start = getStartOfTodayBrtMs(Date.now());
+        const r = db.prepare("SELECT COUNT(*) as c FROM dashboard_logs WHERE to_jid = ? AND timestamp >= ? AND type = 'action' AND text LIKE 'Comando executado:%'").get(jid, start);
+        return Number(r?.c) || 0;
+    } catch (_) { return 0; }
+}
+
+// ============================================================
 // Fichas de pessoas (!ficha) — escopo global
 // ============================================================
 function _pessoaStmts() {
@@ -3146,7 +3190,7 @@ module.exports = {
     consumePendingMessageDeletes, requeueMessageCloudDelete,
     updateMemberActivity, getTopMember, getMonthlyRank, getGlobalMonthlyRank, getTopGroupsByActivity, clearMonthlyRank, clearAllMonthlyRanks, checkMonthlyReset, _getCurrentMonthKey, _getMonthLabelBr,
     snapshotMonthlyRanks, getRankHistory, backupDatabase,
-    recordGroupMessage, recordModEvent, getGroupAnalytics,
+    recordGroupMessage, recordModEvent, getGroupAnalytics, getStartOfTodayBrtMs, getGroupMsgsToday, getGroupCommandsToday,
     getCachedParticipantName, getGroupParticipantName,
     getAdmins, isUserAdmin, botIsAdmin, getBotJid,
     canUseViewOnce, viewOnceBlockedMessage,

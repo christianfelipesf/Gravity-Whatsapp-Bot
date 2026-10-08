@@ -14,8 +14,13 @@ module.exports = {
         const senderNorm = utils.normalizeJid(sender);
         const isOwner = m.key.fromMe || sender === meId || senderNorm === meId;
 
-        if (!isSenderAdmin && !isOwner) {
-            return await sock.sendMessage(from, { text: '❌ Apenas administradores podem usar este comando.' }, { quoted: m });
+        let isGuardian = false;
+        if (!isSenderAdmin && !isOwner && typeof utils.canGuardianActAsync === 'function') {
+            try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) isGuardian = true; } catch (_) {}
+        }
+
+        if (!isSenderAdmin && !isOwner && !isGuardian) {
+            return await sock.sendMessage(from, { text: '❌ Apenas administradores ou guardiões podem usar este comando.' }, { quoted: m });
         }
 
         const ctx = m.message.extendedTextMessage?.contextInfo;
@@ -27,13 +32,17 @@ module.exports = {
             return await sock.sendMessage(from, { text: '❌ Você precisa *responder/marcar* a mensagem que deseja apagar.\n\nEx: responda a mensagem com *!deletarmsg*' }, { quoted: m });
         }
 
-        const isBotAdmin = await utils.botIsAdmin(sock, from);
-        if (!isBotAdmin) {
-            return await sock.sendMessage(from, { text: '❌ Eu preciso ser administrador para apagar mensagens.' }, { quoted: m });
+        const isQuotedFromMe = participant ? utils.normalizeJid(participant) === meId : false;
+        // Mensagem do próprio bot: o WhatsApp deixa o bot apagar a própria msg
+        // mesmo sem ser admin (delete fromMe). Só msg de terceiros exige bot-admin.
+        if (!isQuotedFromMe) {
+            const isBotAdmin = await utils.botIsAdmin(sock, from);
+            if (!isBotAdmin) {
+                return await sock.sendMessage(from, { text: '❌ Eu preciso ser administrador para apagar mensagens de outras pessoas.\n\n💡 Mensagens do próprio bot eu consigo apagar mesmo sem admin — responda a msg do bot com *!d*.' }, { quoted: m });
+            }
         }
 
         try {
-            const isQuotedFromMe = participant ? utils.normalizeJid(participant) === meId : false;
             const key = {
                 remoteJid: from,
                 id: stanzaId,

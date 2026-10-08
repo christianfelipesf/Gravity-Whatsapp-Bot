@@ -11,8 +11,9 @@ const PARTIAL_PENDING_MAX = 200;
 const PARTIAL_ALLOWED_CATEGORIES = new Set(['mídia', 'midia', 'interação', 'interacao']);
 const PARTIAL_ALLOWED_COMMANDS = new Set(['tts', 'falar', 'voz', 'fala', 'speak']);
 const PARTIAL_BLOCKED_COMMANDS = new Set([
-    'ban', 'add', 'mute', 'desmute', 'antilink', 'limpar', 'clear', 'purge', 'delete', 'apagar', 'del', 'clearchat',
-    'divulgar', 'mencionar', 'set', 'setprefix', 'multiprefixo', 'multiprefix', 'prefixos', 'addguardiao', 'addguardian', 'remguardiao', 'remguardian', 'delguardiao', 'listguardioes', 'listguardians', 'guardioes', 'guardians', 'temaglobal', 'globaltema', 'temaglob', 'setlink', 'dashreset', 'newsreset',
+    'ban', 'add', 'mute', 'mutar', 'desmute', 'desmutar', 'antilink', 'limpar', 'clear', 'purge', 'delete', 'apagar', 'del', 'clearchat',
+    'd', 'deletemsg', 'deletarmsg', 'apagarmsg', 'delmsg', 'deletar', 'apagarmensagem',
+    'divulgar', 'mencionar', 'set', 'setprefix', 'multiprefixo', 'multiprefix', 'prefixos', 'addguardiao', 'addguardian', 'remguardiao', 'remguardian', 'delguardiao', 'listguardioes', 'listguardians', 'guardioes', 'listaguardioes', 'guardians', 'menuguardiao', 'menuguardian', 'menu-guardiao', 'menuguardioes', 'guardiaomenu', 'redegravity', 'redegravidade', 'redegrav', 'rede-gravity', 'gruposgravity', 'statusgrupos', 'statusgroups', 'gruposstatus', 'metricasgrupos', 'statusgps', 'painelgrupos', 'temaglobal', 'globaltema', 'temaglob', 'setlink', 'dashreset', 'newsreset',
     'dashboardativar', 'dashboarddesativar', 'newsativar', 'newsdesativar', 'dump', 'config', 'nome', 'tema', 'theme',
     'log', 'logs', 'logsterminal', 'terminallog',
     'menu', 'help', 'comandos', 'prefixo', 'prefix', 'resumir', 'grupos', 'perfil', 'ai',

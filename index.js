@@ -110,7 +110,7 @@ try { telegramBot.start(); } catch (e) {
 global.__botServices = { news, splash, dashboard, watchdog, telegram, telegramBot };
 global.__startTime = Date.now();
 
-// Histórico (!aidono/!resumir) — dono próprio, independe do painel web.
+// Histórico (!investigar/!resumir) — dono próprio, independe do painel web.
 // O dashboard.init() também chama, mas aqui garante mesmo se o painel falhar.
 try { require('./src/history/store').ensureHistoryTrimLoop(); } catch (e) {
     console.error('⚠️ [history] falha ao iniciar trim (segue normal):', e.message);

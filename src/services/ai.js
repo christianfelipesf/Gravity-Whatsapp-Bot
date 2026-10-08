@@ -307,7 +307,7 @@ function setupAI(config) {
                 cached: result.cached
             };
         },
-        // Modo agente (!aidono investigar): chat com tools, sem cache.
+        // Modo agente (!investigartudo / !investigar tudo): chat com tools, sem cache.
         // Retorna { text, toolCalls, finish, ... } — toolCalls vazio = resposta final.
         chatWithTools: async (messages, tools, opts = {}) => {
             if (!Array.isArray(messages) || messages.length === 0) {

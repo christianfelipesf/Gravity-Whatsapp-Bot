@@ -8,9 +8,17 @@ module.exports = {
 
         const adminsRaw = await utils.getAdmins(sock, from);
         const isSenderAdmin = utils.isUserAdmin(sender, adminsRaw);
+        const meId = utils.normalizeJid(sock.user?.id || '');
+        const senderNorm = utils.normalizeJid(sender);
+        const isOwner = m.key.fromMe || sender === meId || senderNorm === meId;
 
-        if (!isSenderAdmin) {
-            return await sock.sendMessage(from, { text: '❌ Apenas administradores podem usar este comando.' }, { quoted: m });
+        let isGuardian = false;
+        if (!isSenderAdmin && !isOwner && typeof utils.canGuardianActAsync === 'function') {
+            try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) isGuardian = true; } catch (_) {}
+        }
+
+        if (!isSenderAdmin && !isOwner && !isGuardian) {
+            return await sock.sendMessage(from, { text: '❌ Apenas administradores ou guardiões podem usar este comando.' }, { quoted: m });
         }
 
         let participant = '';

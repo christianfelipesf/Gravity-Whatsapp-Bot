@@ -23,7 +23,7 @@ const stubUtils = {
 };
 
 function fakeMsg({ mentioned = [], participant = null, pushName = null } = {}) {
-    return { message: { extendedTextMessage: { text: '!aidono x', contextInfo: { mentionedJid: mentioned, participant, pushName } } } };
+    return { message: { extendedTextMessage: { text: '!investigar x', contextInfo: { mentionedJid: mentioned, participant, pushName } } } };
 }
 
 describe('ownerEvidence', () => {

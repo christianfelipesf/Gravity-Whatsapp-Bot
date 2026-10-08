@@ -173,6 +173,7 @@ db.exec(`
     );
     CREATE INDEX IF NOT EXISTS idx_dashboard_logs_ts ON dashboard_logs(timestamp);
     CREATE INDEX IF NOT EXISTS idx_dashboard_logs_to_jid ON dashboard_logs(to_jid, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_dashboard_logs_sender ON dashboard_logs(sender_jid, timestamp);
     CREATE INDEX IF NOT EXISTS idx_dashboard_logs_msgid
         ON dashboard_logs(message_id)
         WHERE message_id IS NOT NULL AND message_id != '';
@@ -278,6 +279,8 @@ db.exec(`
         sender_jid   TEXT,
         sender_name  TEXT,
         sender_phone TEXT,
+        group_jid    TEXT,
+        group_name   TEXT,
         created_at   INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_memes_created ON memes(created_at DESC);
@@ -303,6 +306,8 @@ try { db.exec("ALTER TABLE group_state ADD COLUMN sticker_pack TEXT"); } catch (
 try { db.exec("ALTER TABLE group_state ADD COLUMN sticker_author TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE group_state ADD COLUMN theme TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE group_state ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'"); } catch (_) {}
+try { db.exec("ALTER TABLE memes ADD COLUMN group_jid TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE memes ADD COLUMN group_name TEXT"); } catch (_) {}
 
 // Antispam/antilink ON por padrão — migração única (idempotente via flag em config).
 // Grupos que estavam com OFF explícito voltam a ON uma vez; admin pode desligar de novo.

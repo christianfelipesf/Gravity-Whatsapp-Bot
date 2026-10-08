@@ -2,7 +2,7 @@ module.exports = {
     name: 'addguardiao',
     aliases: ['addguardian', 'adicionarguardiao', 'setguardiao'],
     category: 'admin',
-    description: 'Dá poder de guardião: ativar/desativar, modo parcial, news, aidono e autoresponder. Dono e sub-donos.',
+    description: 'Dá poder de guardião: ativar/desativar, parcial, news, investigartudo, autoresponder, mutar, apagar e redegravity. Dono e sub-donos.',
     async execute(sock, m, { from, sender, args, fullArgsText, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
         const { react } = utils;
 
@@ -66,7 +66,7 @@ module.exports = {
             return await react(sock, m, '❌', currentBotResponse, GLOBAL_COOLDOWN);
         }
 
-        await sock.sendMessage(from, { text: `✅ *${res.phone}* agora é *guardião* do bot! 🛡️💛\n\nCom essa confiança ele vai poder:\n✅ Ligar e desligar o bot nos grupos (*!ativar* / *!desativar*)\n✅ Usar o modo parcial (*!ativarp* / *!desativarp*)\n✅ Cuidar das notícias (*!news ativar/desativar*)\n✅ Conversar com a IA do dono (*!aidono*)\n✅ Ligar e desligar o bate-papo automático (*!autoresponder on/off*)\n\nObrigado por ajudar a cuidar da comunidade! ✨\n💡 Veja a lista com *!listguardioes*` }, { quoted: m });
+        await sock.sendMessage(from, { text: `✅ *${res.phone}* agora é *guardião* do bot! 🛡️💛\n\nCom essa confiança ele vai poder:\n✅ Ligar e desligar o bot nos grupos (*!ativar* / *!desativar*)\n✅ Usar o modo parcial (*!ativarp* / *!desativarp*)\n✅ Cuidar das notícias (*!news ativar/desativar*)\n✅ Conversar com a IA investigativa (*!investigar*) e investigação profunda (*!investigartudo*)\n✅ Ligar e desligar o bate-papo automático (*!autoresponder on/off*)\n✅ Mutar/desmutar pessoas (*!mutar* / *!desmutar*)\n✅ Apagar msgs do bot (mesmo sem admin) e de pessoas (*!d* respondendo)\n✅ Ver a rede de grupos (*!redegravity*)\n✅ Ver métricas dos grupos (*!statusgrupos*)\n\nObrigado por ajudar a cuidar da comunidade! ✨\n💡 Veja tudo com *!menuguardiao*` }, { quoted: m });
         return await react(sock, m, '✅', currentBotResponse, GLOBAL_COOLDOWN);
     }
 };

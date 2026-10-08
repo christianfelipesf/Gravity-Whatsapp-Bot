@@ -1,6 +1,6 @@
 # Histórico (caminho próprio, sem painel)
 
-O histórico do bot (`!aidono`, `!resumir`, logs de eventos/mídia) mora aqui:
+O histórico do bot (`!investigar`, `!resumir`, logs de eventos/mídia) mora aqui:
 
 - `src/history/store.js` — escrita e leitura no SQLite. Único lugar que
   grava histórico. Não requer o painel.

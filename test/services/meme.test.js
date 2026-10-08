@@ -17,10 +17,9 @@ describe('memeStore puras', () => {
         assert.strictEqual(memeStore.formatDateBR('x'), '—');
     });
 
-    it('buildMemeCaption tem enviado por + grupo + data (sem cabeçalho)', () => {
+    it('buildMemeCaption mostra origem (grupo onde foi postado)', () => {
         const cap = memeStore.buildMemeCaption(
-            { id: 7, sender_name: 'Maria', sender_phone: '5515999999999', created_at: new Date(2026, 9, 6).getTime() },
-            'Família'
+            { id: 7, sender_name: 'Maria', sender_phone: '5515999999999', group_name: 'Família', created_at: new Date(2026, 9, 6).getTime() }
         );
         assert.ok(!cap.includes('#7'));
         assert.ok(!cap.includes('Meme'));
@@ -33,6 +32,13 @@ describe('memeStore puras', () => {
         assert.ok(cap.includes('06/10/2026'));
     });
 
+    it('buildMemeCaption origem privado', () => {
+        const cap = memeStore.buildMemeCaption(
+            { sender_name: 'João', sender_phone: null, group_name: 'privado', created_at: new Date(2026, 9, 6).getTime() }
+        );
+        assert.ok(cap.includes('privado'));
+    });
+
     it('extractPhone resolve @lid via participantPn', () => {
         const m = { key: { participantPn: '5515988887777@s.whatsapp.net' } };
         assert.strictEqual(memeStore.extractPhone('123@lid', m), '5515988887777');
@@ -40,11 +46,11 @@ describe('memeStore puras', () => {
         assert.strictEqual(memeStore.extractPhone('invalido', {}), null);
     });
 
-    it('checkMemeGroupCooldown barra 2º sorteio em <30s', () => {
+    it('checkMemeGroupCooldown desativado — sempre liberado (sem delay)', () => {
         const jid = `teste-${Date.now()}@g.us`;
         assert.strictEqual(memeStore.checkMemeGroupCooldown(jid), 0);
-        const rest = memeStore.checkMemeGroupCooldown(jid);
-        assert.ok(rest > 0 && rest <= memeStore.MEME_GROUP_COOLDOWN_MS);
+        assert.strictEqual(memeStore.checkMemeGroupCooldown(jid), 0);
+        assert.strictEqual(memeStore.MEME_GROUP_COOLDOWN_MS, 0);
     });
 });
 

@@ -277,7 +277,7 @@ async function _handleSingleMessage(sock, m, { commands, config, startTime }) {
             if (await handleProtocolMessage(sock, m, from, sender, senderName)) return;
 
             const botActive = !isGroup || isActiveGroup(from);
-            // Histórico (!aidono/!resumir) independe do painel: grava em todo
+            // Histórico (!investigar/!resumir) independe do painel: grava em todo
             // grupo ativo ou parcial. PV mantém a regra antiga (painel).
             const historyOn = isGroup ? shouldRecordHistory(from) : isDashboardEnabled(from);
 
@@ -287,7 +287,7 @@ async function _handleSingleMessage(sock, m, { commands, config, startTime }) {
                 if (enforcement === 'muted' || enforcement === 'antilink' || enforcement === 'antiflood') return;
             }
 
-            // === Histórico p/ !aidono e !resumir (ativo + parcial, sem painel) ===
+            // === Histórico p/ !investigar e !resumir (ativo + parcial, sem painel) ===
             if (historyOn) {
                 const groupMetadata = isGroup
                     ? await groupMetadataCached(sock, from).catch(() => ({ subject: 'Grupo' }))

@@ -1,4 +1,4 @@
-// src/history/store.js — camada própria de histórico (!aidono / !resumir).
+// src/history/store.js — camada própria de histórico (!investigar / !resumir).
 //
 // REGRA: todo código novo de histórico usa este módulo. NUNCA faça
 // `require('../dashboard/dashboard')` em código novo — o painel web foi
@@ -198,7 +198,7 @@ function ensureHistoryTrimLoop() {
     return true;
 }
 
-// --- Leitura (caminho próprio do !aidono / !resumir) ------------------------
+// --- Leitura (caminho próprio do !investigar / !resumir) ------------------------
 
 module.exports = {
     setMirror,

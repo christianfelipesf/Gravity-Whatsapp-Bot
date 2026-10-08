@@ -1,4 +1,4 @@
-// ownerAgent.js — modo investigar do !aidono (agentic loop com tools).
+// ownerAgent.js — modo pesado do !investigar tudo / !investigartudo (agentic loop com tools).
 // O modelo decide o que buscar em até MAX_ROUNDS rodadas; o executor roda
 // tudo local (SQLite, R$0 por busca). Só leitura — nenhuma tool altera nada.
 
@@ -199,6 +199,18 @@ function msgLines(msgs, maxChars) {
     return out;
 }
 
+// Intervalo dd/mm→dd/mm do pool (cronológico) p/ anunciar total honesto.
+function spanOf(msgs) {
+    try {
+        if (!msgs || !msgs.length) return '';
+        const t0 = Number(msgs[0].timestamp) || 0;
+        const t1 = Number(msgs[msgs.length - 1].timestamp) || 0;
+        if (!t0 || !t1) return '';
+        const f = (ms) => new Date(Number(ms)).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' });
+        return ` ${f(t0)}→${f(t1)}`;
+    } catch (_) { return ''; }
+}
+
 async function executeTool(name, args, ctx) {
     const { sock, from, utils } = ctx;
     const a = args && typeof args === 'object' ? args : {};
@@ -213,14 +225,16 @@ async function executeTool(name, args, ctx) {
                 const tr = a.periodo ? extractTimeRange(String(a.periodo)) : null;
                 const winTag = tr ? ` ${tr.label}` : ' no histórico todo';
                 const lim = clampLim(a.limite, 12);
-                // Sem período: busca pool largo (100) p/ amostrar o período
-                // todo — senão "resume a pessoa" vira só as últimas falas.
-                const fetchLim = tr ? 20 : 100;
+                // Pool cheio (até 2000): total e intervalo anunciados são
+                // honestos; a exibição continua curta (lim).
+                const fetchLim = tr ? 1000 : 2000;
                 let msgs = (tr && utils?.getMessagesBySenderRange)
-                    ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 20) || [])
+                    ? (utils.getMessagesBySenderRange(p.jid, p.alias, tr.since, tr.until, 1000) || [])
                     : (utils?.getMessagesBySender?.(p.jid, p.alias, fetchLim) || []);
                 let approx = false;
                 let where = '';
+                let poolTotal = 0;
+                let poolSpan = '';
                 // Fallback por nome SEMPRE (funde com dedupe): cobre grupos que
                 // a busca exata não viu.
                 {
@@ -237,13 +251,13 @@ async function executeTool(name, args, ctx) {
                         const rangeFn = tr && utils?.getMessagesByPushNameRange ? utils.getMessagesByPushNameRange.bind(utils) : null;
                         for (const gj of [...scopes, null]) {
                             if (rangeFn) {
-                                const extra = rangeFn(gj, pname, tr.since, tr.until, 20) || [];
+                                const extra = rangeFn(gj, pname, tr.since, tr.until, 1000) || [];
                                 for (const r of extra) collected.push({ gj: r.jid || gj, r });
-                                if (collected.length >= 40) break;
+                                if (collected.length >= 2500) break;
                             } else {
-                                const extra = likeFn?.call(utils, gj, pname, tr ? lim : 100) || [];
+                                const extra = likeFn?.call(utils, gj, pname, tr ? 500 : 1000) || [];
                                 for (const r of extra) collected.push({ gj: r.jid || gj, r });
-                                if (collected.length >= (tr ? 24 : 200)) break;
+                                if (collected.length >= (tr ? 1200 : 2500)) break;
                             }
                         }
                         let pool = collected;
@@ -257,6 +271,8 @@ async function executeTool(name, args, ctx) {
                             const fbRows = pool.map(({ r }) => ({ text: r.text, name: r.push_name, timestamp: r.time, fb: true }));
                             const merged = mergeMsgLists(msgs.map((x) => ({ ...x, fb: false })), fbRows);
                             if (merged.some((x) => x.fb)) approx = true;
+                            poolTotal = merged.length;
+                            poolSpan = spanOf(merged);
                             if (!tr && merged.length > lim) {
                                 // amostra distribuída antigas→recentes (não só últimas)
                                 const step = merged.length / lim;
@@ -274,6 +290,8 @@ async function executeTool(name, args, ctx) {
                 }
                 if (!msgs.length) return `${out}\nSem mensagens${winTag} no histórico.`;
                 if (!tr && msgs.length > lim) {
+                    poolTotal = poolTotal || msgs.length;
+                    poolSpan = poolSpan || spanOf(msgs);
                     const total = msgs.length;
                     const step = total / lim;
                     const sampled = [];
@@ -283,7 +301,9 @@ async function executeTool(name, args, ctx) {
                     msgs = sampled;
                     if (!/amostra/.test(where)) where += ` (amostra ${lim} de ${total})`;
                 }
-                return `${out} — ${msgs.length} msgs${winTag}${where}${approx ? ' (aproximado por nome)' : ''}:\n` + msgLines(msgs, 150).join('\n');
+                const shownTotal = poolTotal || msgs.length;
+                const shownSpan = poolSpan || (/amostra/.test(where) ? '' : spanOf(msgs));
+                return `${out} — ${shownTotal} msgs${winTag}${shownSpan}${where}${approx ? ' (aproximado por nome)' : ''}:\n` + msgLines(msgs, 150).join('\n');
             }
             case 'buscar_mensagens_grupo': {
                 const g = await findGroup(sock, a.grupo, ctx);
@@ -291,28 +311,31 @@ async function executeTool(name, args, ctx) {
                 const gtr = a.periodo ? extractTimeRange(String(a.periodo)) : null;
                 const gWin = gtr ? ` ${gtr.label}` : '';
                 const glim = clampLim(a.limite, 15);
+                // Pool cheio (até 1000/2000): total honesto, exibição curta.
                 let msgs = (gtr && utils?.getMessagesByGroupRange)
-                    ? (utils.getMessagesByGroupRange(g.jid, gtr.since, gtr.until, 20) || [])
-                    : (utils?.getMessagesByGroup?.(g.jid, glim) || []);
+                    ? (utils.getMessagesByGroupRange(g.jid, gtr.since, gtr.until, 1000) || [])
+                    : (utils?.getMessagesByGroup?.(g.jid, 1000) || []);
                 // Fallback fundido com dedupe (mesmo motivo da pessoa).
                 try {
                     let extra = [];
                     if (gtr && utils?.getGroupMessagesRange) {
-                        extra = utils.getGroupMessagesRange(g.jid, gtr.since, gtr.until, 20) || [];
+                        extra = utils.getGroupMessagesRange(g.jid, gtr.since, gtr.until, 1000) || [];
                     } else {
-                        const all = utils?.getGroupMessages?.(g.jid, glim) || [];
+                        const all = utils?.getGroupMessages?.(g.jid, 1000) || [];
                         extra = gtr ? all.filter((r) => (r.time || 0) >= gtr.since && (r.time || 0) <= gtr.until) : all;
                     }
                     if (extra.length) {
                         const fbRows = extra.map((r) => ({ text: r.text, name: r.push_name, senderJid: null, timestamp: r.time, fb: true }));
-                        msgs = mergeMsgLists(msgs.map((x) => ({ ...x, fb: false })), fbRows).slice(-glim);
-                    } else {
-                        msgs = msgs.slice(-glim);
+                        msgs = mergeMsgLists(msgs.map((x) => ({ ...x, fb: false })), fbRows);
                     }
                 } catch (_) {}
                 let approx = msgs.some((x) => x.fb);
                 if (!msgs.length) return `Grupo ${clean(g.subject, 40)}: sem mensagens${gWin} no histórico.`;
-                return `Grupo ${clean(g.subject, 40)} — ${msgs.length} msgs${gWin}${approx ? ' (autores por nome)' : ''}:\n` + msgLines(msgs, 130).join('\n');
+                const gTotal = msgs.length;
+                const gSpan = spanOf(msgs);
+                msgs = msgs.slice(-glim);
+                const gCut = gTotal > msgs.length ? ` (mostrando as ${msgs.length} mais recentes de ${gTotal})` : '';
+                return `Grupo ${clean(g.subject, 40)} — ${gTotal} msgs${gWin}${gSpan}${approx ? ' (autores por nome)' : ''}${gCut}:\n` + msgLines(msgs, 130).join('\n');
             }
             case 'ver_advs': {
                 const p = await findPerson(sock, a.pessoa, ctx);
@@ -445,5 +468,5 @@ async function runInvestigativeLoop({ model, sock, question, from, isGroup, requ
 
 module.exports = {
     OWNER_TOOLS, OWNER_AGENT_SYSTEM, MAX_ROUNDS, MAX_CALLS_PER_ROUND, TOOL_RESULT_BUDGET,
-    findPerson, findGroup, executeTool, runInvestigativeLoop
+    findPerson, findGroup, executeTool, runInvestigativeLoop, spanOf
 };

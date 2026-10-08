@@ -19,7 +19,7 @@ const sock = {
     })
 };
 
-describe('!aidono — alias reverso telefone→LID', () => {
+describe('!investigar — alias reverso telefone→LID', () => {
     it('resolvePhoneLidInGroup acha o LID pelo número', async () => {
         assert.strictEqual(await utils.resolvePhoneLidInGroup(sock, PHONE, G), LID);
     });

@@ -76,24 +76,30 @@ async function resolveChannelInfo(sock, config) {
     }
 }
 
-// Monta o contextInfo de encaminhado do canal, preservando o que já existe
+// Monta o contextInfo de atribuição do canal, preservando o que já existe
 // (mentions, externalAdReply do !play, etc).
+// ATENÇÃO: forwardingScore precisa ficar <= 4 e sem isForwarded — acima
+// disso o WhatsApp carimba "Encaminhada com frequência", o que limita o
+// encaminhamento (1 conversa por vez) e atrapalha baixar/salvar. Só o
+// forwardedNewsletterMessageInfo já mostra o "via Canal Oficial".
 function buildChannelContextInfo(config, extraContextInfo) {
     const { jid, name } = getChannelConfig(config);
     const base = (extraContextInfo && typeof extraContextInfo === 'object') ? { ...extraContextInfo } : {};
     const prevFwd = (base.forwardedNewsletterMessageInfo && typeof base.forwardedNewsletterMessageInfo === 'object')
         ? base.forwardedNewsletterMessageInfo
         : {};
-    return {
+    const out = {
         ...base,
-        forwardingScore: 999,
-        isForwarded: true,
+        forwardingScore: 1,
         forwardedNewsletterMessageInfo: {
             newsletterJid: jid,
             newsletterName: name,
             serverMessageId: Number(prevFwd.serverMessageId) > 0 ? prevFwd.serverMessageId : 1,
         },
     };
+    // Nunca vazar selo de encaminhado mesmo se o contexto extra trouxer um.
+    delete out.isForwarded;
+    return out;
 }
 
 // Anexa o context do canal dentro do payload (1º arg do sendMessage).

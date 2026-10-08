@@ -14,9 +14,40 @@ module.exports = {
         const subAccess = !isOwner && typeof utils.canConfigureBot === 'function'
             ? utils.canConfigureBot(sock, m, sender, from)
             : { ok: isOwner };
-        const isSub = !isOwner && subAccess.ok;
+        let isSub = !isOwner && subAccess.ok;
+
+        // Sub-dono via LID resolvido async (metadata) — evita falso-negativo.
+        if (!isOwner && !isSub && typeof utils.isSubOwnerSenderAsync === 'function') {
+            try {
+                const rAsync = await utils.isSubOwnerSenderAsync(sock, m, sender, from);
+                if (rAsync && rAsync.ok) isSub = true;
+            } catch (_) {}
+        }
 
         if (!isOwner && !isSub) {
+            // Guardião tentando usar !menudono → sugere o menu dele.
+            let isGuard = false;
+            try {
+                if (typeof utils.isGuardiaoSender === 'function') {
+                    const g = utils.isGuardiaoSender(sock, m, sender, from);
+                    if (g && (g.ok || g.guardiao)) isGuard = true;
+                }
+            } catch (_) {}
+            if (!isGuard && typeof utils.isGuardiaoSenderAsync === 'function') {
+                try {
+                    const g = await utils.isGuardiaoSenderAsync(sock, m, sender, from);
+                    if (g && (g.ok || g.guardiao)) isGuard = true;
+                } catch (_) {}
+            }
+            if (!isGuard && typeof utils.canGuardianActAsync === 'function') {
+                try {
+                    const g = await utils.canGuardianActAsync(sock, m, sender, from);
+                    if (g && g.guardiao) isGuard = true;
+                } catch (_) {}
+            }
+            if (isGuard) {
+                return sock.sendMessage(from, { text: `❌ *${p}menudono* é só para o *dono do bot* (e sub-donos).\n\n🛡️ Você é *guardião*: use *${p}menuguardiao* para ver seus poderes. ✨` }, { quoted: m });
+            }
             return sock.sendMessage(from, { text: '❌ Apenas o *dono do bot* pode usar este comando.' }, { quoted: m });
         }
 
@@ -33,9 +64,9 @@ module.exports = {
             `│ 📋 *${p}listsubdonos* — lista sub-donos\n` +
             `╰───────────────\n\n` +
             `╭─── *GUARDIÕES (dono + sub-dono)* ───\n` +
-            `│ 🛡️ *${p}addguardiao* <numero> — dá poder de guardião: ativar, parcial, news e aidono ✨\n` +
+            `│ 🛡️ *${p}addguardiao* <numero> — dá poder de guardião: ativar, parcial, news, investigartudo, mutar, apagar e rede ✨\n` +
             `│ ➖ *${p}remguardiao* <numero|all> — remove guardião\n` +
-            `│ 📋 *${p}listguardioes* — lista guardiões\n` +
+            `│ 📋 *${p}menuguardiao* — menu + lista dos guardiões\n` +
             `╰───────────────\n\n` +
             `╭─── *ATIVAÇÃO* ───\n` +
             `│ ✅ *${p}ativar* / *${p}desativar* — liga/desliga bot no grupo\n` +

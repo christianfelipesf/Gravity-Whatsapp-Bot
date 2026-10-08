@@ -9,8 +9,8 @@ module.exports = {
     aliases: ['novomeme', 'memenovo'],
     category: 'mídia',
     description: 'Adiciona um meme ao acervo (marque uma foto ou envie com legenda)',
-    async execute(sock, m, { from, sender, senderName, config, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
-        const { react, getMediaMessage } = utils;
+    async execute(sock, m, { from, isGroup, sender, senderName, config, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
+        const { react, getMediaMessage, groupMetadataCached } = utils;
         const ctx = m.message?.extendedTextMessage?.contextInfo;
         const quotedMsg = ctx?.quotedMessage || null;
 
@@ -55,9 +55,20 @@ module.exports = {
 
         const senderJid = m.key.participant || m.key.remoteJid || sender || null;
         const phone = memeStore.extractPhone(sender || senderJid, m);
+        // Origem: nome do grupo onde foi postado, ou "privado".
+        let originJid = null;
+        let originName = 'privado';
+        if (isGroup) {
+            originJid = from;
+            try {
+                const meta = await groupMetadataCached(sock, from).catch(() => null);
+                if (meta?.subject) originName = meta.subject;
+                else originName = '—';
+            } catch (_) { originName = '—'; }
+        }
         let saved;
         try {
-            saved = await memeStore.saveMeme(buffer, { senderJid, senderName: senderName || m.pushName || 'Usuário', senderPhone: phone });
+            saved = await memeStore.saveMeme(buffer, { senderJid, senderName: senderName || m.pushName || 'Usuário', senderPhone: phone, groupJid: originJid, groupName: originName });
         } catch (e) {
             await sock.sendMessage(from, { text: `❌ ${e?.message || 'Falha ao salvar.'}` }, { quoted: m });
             return await react(sock, m, '❌', current, GLOBAL_COOLDOWN);

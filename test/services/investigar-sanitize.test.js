@@ -2,11 +2,11 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 
 const ev = require('../../src/services/ownerEvidence');
-const cmd = require('../../src/commands/aidono.js');
+const cmd = require('../../src/commands/investigar.js');
 
 const LID = '86522200076318@lid';
 
-describe('!aidono — jid nunca chega na IA', () => {
+describe('!investigar — jid nunca chega na IA', () => {
     it('safePersonLabel: nome humano passa, jid/LID vira tag', () => {
         assert.strictEqual(ev.safePersonLabel('Mika'), 'Mika');
         assert.strictEqual(ev.safePersonLabel('57 diabo Do Rj'), '57 diabo Do Rj');
@@ -61,8 +61,8 @@ describe('!aidono — jid nunca chega na IA', () => {
     });
 
     it('prompt final do comando: sem jid + com a regra anti-jid', async () => {
-        delete require.cache[require.resolve('../../src/commands/aidono.js')];
-        const fresh = require('../../src/commands/aidono.js');
+        delete require.cache[require.resolve('../../src/commands/investigar.js')];
+        const fresh = require('../../src/commands/investigar.js');
         const inbox = [];
         let captured = null;
         const sock = { sendMessage: async (to, c) => { inbox.push(String(c?.text || '')); return {}; } };
@@ -88,7 +88,7 @@ describe('!aidono — jid nunca chega na IA', () => {
         };
         const m = {
             key: { remoteJid: 'g@g.us', fromMe: false }, pushName: 'Dono',
-            message: { extendedTextMessage: { text: '!aidono x', contextInfo: { mentionedJid: [LID] } } }
+            message: { extendedTextMessage: { text: '!investigar x', contextInfo: { mentionedJid: [LID] } } }
         };
         await fresh.execute(sock, m, {
             from: 'g@g.us', isGroup: true, sender: 'dono@s.whatsapp.net',

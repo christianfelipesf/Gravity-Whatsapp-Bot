@@ -91,7 +91,7 @@ module.exports = {
         // subOwners e guardioes NÃO são editáveis via !set (evita escalação).
         // Use !addsubdono / !remsubdono / !addguardiao / !remguardiao.
         if (p === 'subOwners' || p === 'guardioes' || ['subowners', 'guardioes', 'guardiao', 'guardian'].includes(String(p || '').toLowerCase())) {
-            await sock.sendMessage(from, { text: `👑 *Sub-donos* só pelo dono via:\n➕ \`${config.prefix}addsubdono <numero>\`\n➖ \`${config.prefix}remsubdono <numero>\`\n📋 \`${config.prefix}listsubdonos\`\n\n🛡️ *Guardiões* pelo dono/subdono via:\n➕ \`${config.prefix}addguardiao <numero>\`\n➖ \`${config.prefix}remguardiao <numero>\`\n📋 \`${config.prefix}listguardioes\`` }, { quoted: m });
+            await sock.sendMessage(from, { text: `👑 *Sub-donos* só pelo dono via:\n➕ \`${config.prefix}addsubdono <numero>\`\n➖ \`${config.prefix}remsubdono <numero>\`\n📋 \`${config.prefix}listsubdonos\`\n\n🛡️ *Guardiões* pelo dono/subdono via:\n➕ \`${config.prefix}addguardiao <numero>\`\n➖ \`${config.prefix}remguardiao <numero>\`\n📋 \`${config.prefix}menuguardiao\`` }, { quoted: m });
             return lastBotResponse;
         }
 

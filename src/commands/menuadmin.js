@@ -45,6 +45,7 @@ module.exports = {
             `│ 🚨 *${p}antiflood* — ativa/configura antiflood (admin desligado por padrão)\n` +
             `│ 🔇 *${p}mute* @user — silencia\n` +
             `│ 🔊 *${p}desmute* @user — dessilencia\n` +
+            `│ 🗑️ *${p}d* (responda msg) — apaga msg do bot ou de pessoas\n` +
             `│ 🧹 *${p}limpar* [n] — apaga mensagens\n` +
             `│ 🗑️ *${p}deletarmsg* (responda) — apaga mensagem marcada\n` +
             `╰───────────────\n\n` +
@@ -69,7 +70,7 @@ module.exports = {
             `│ 🔗 *${p}setlink* <link> — define link p/ !divulgar\n` +
             `│ 🤖 *${p}autoresponder* on|off — chat automático (tom do grupo, sem moderar)\n` +
             `╰───────────────\n\n` +
-            `_Use ${p}menudono para comandos do dono do bot._`;
+            `_Use ${p}menudono para comandos do dono do bot • ${p}menuguardiao para poderes dos guardiões._`;
 
         return sock.sendMessage(from, { text }, { quoted: m });
     }

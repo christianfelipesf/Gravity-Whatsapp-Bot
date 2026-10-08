@@ -1,6 +1,6 @@
 const { resolveTargets, buildEvidence, buildComparisonEvidence, matchFactual, wantsLogs, wantsProfileSummary, evidenceIsEmpty, extractTimeRange, rangesForComparison } = require('../services/ownerEvidence');
 
-// Confirmações pendentes do modo investigar: chave `${from}::${sender}`.
+// Confirmações pendentes do modo tudo: chave `${from}::${sender}`.
 // Evita rodar investigação cara (multi-chamadas de IA) sem querer.
 const _pendingInvestigations = new Map();
 const CONFIRM_TTL_MS = 2 * 60 * 1000;
@@ -47,52 +47,85 @@ async function doInvestigate(sock, m, { from, isGroup, sender, config, utils, mo
     return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
 }
 
-const OWNER_SYSTEM = 'Você é o auxiliar privado do dono do bot 🤖. Responda com emojis ✨, de forma direta e objetiva, com base APENAS nas evidências abaixo (mensagens reais, advertências e atividade). ⚠️ Só mencione advertências se o dono perguntar sobre isso — nunca traga esse assunto por conta própria. Quando a evidência disser "no histórico todo (amostra distribuída)", é um RESUMÃO do período inteiro: faça perfil completo com temas recorrentes, gostos/interesses que aparecem nas falas (comida, música, time, hobbies etc.), jeito/tom da pessoa e exemplos — nunca resuma só as 2-3 últimas linhas. Se houver mensagens na evidência, SEMPRE faça o resumo do jeito/tom da pessoa com o que tem: nunca diga "não há dados suficientes" só porque falta um detalhe (ex.: gostos específicos); nesse caso resuma o que dá pra ver e diga com emoji o que não deu pra saber 🤷. Só diga que não há dados suficientes quando a evidência estiver realmente vazia (zero mensagens). Nunca invente nomes, números ou fatos. Identificadores técnicos (jids como "123@lid"/"456@s.whatsapp.net" ou sequências numéricas longas) são internos: NUNCA os repita na resposta; refira-se às pessoas só pelo nome, ou "a pessoa"/"pessoa A, B" quando o nome for desconhecido. Você só responde perguntas, nunca executa ações.';
+const OWNER_SYSTEM = 'Você é o investigador do bot 🤖. Responda com emojis ✨, de forma direta e objetiva, com base APENAS nas evidências abaixo (mensagens reais, advertências e atividade). ⚠️ Só mencione advertências se perguntarem sobre isso — nunca traga esse assunto por conta própria. Quando a evidência disser "no histórico todo (amostra distribuída)", é um RESUMÃO do período inteiro: faça perfil completo com temas recorrentes, gostos/interesses que aparecem nas falas (comida, música, time, hobbies etc.), jeito/tom da pessoa e exemplos — nunca resuma só as 2-3 últimas linhas. Se houver mensagens na evidência, SEMPRE faça o resumo do jeito/tom da pessoa com o que tem: nunca diga "não há dados suficientes" só porque falta um detalhe (ex.: gostos específicos); nesse caso resuma o que dá pra ver e diga com emoji o que não deu pra saber 🤷. Só diga que não há dados suficientes quando a evidência estiver realmente vazia (zero mensagens). Nunca invente nomes, números ou fatos. Identificadores técnicos (jids como "123@lid"/"456@s.whatsapp.net" ou sequências numéricas longas) são internos: NUNCA os repita na resposta; refira-se às pessoas só pelo nome, ou "a pessoa"/"pessoa A, B" quando o nome for desconhecido. Você só responde perguntas, nunca executa ações.';
+
+// Sem prompt (só marcação): "!investigar @a" vira resumão,
+// "!investigar @a @b" vira relação entre elas.
+function _escapeRegExp(s) {
+    return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function stripPromptForEmptiness(question, targets) {
+    let s = String(question || '');
+    s = s.replace(/@\S+/g, ' ');
+    s = s.replace(/\d{8,}/g, ' ');
+    try {
+        for (const g of (targets?.groups || [])) {
+            if (g?.subject && String(g.subject).trim().length >= 2) {
+                s = s.replace(new RegExp(_escapeRegExp(String(g.subject).trim()), 'ig'), ' ');
+            }
+        }
+    } catch (_) {}
+    s = s.replace(/\b(grupo|gp|pessoa|usu[aá]rio)\b/gi, ' ');
+    s = s.replace(/[?.!,;:\-—*`"'()\[\]{}]+/g, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+}
+function defaultQuestionFor(targets) {
+    const n = (targets?.people || []).length;
+    if (n === 1) return 'Faça um resumo geral sobre essa pessoa: tudo que ela já digitou, temas recorrentes, gostos/interesses que aparecem nas falas, jeito/tom dela, com exemplos.';
+    if (n >= 2) return `Mostre a relação entre essas ${n} pessoas: interações entre elas, assuntos em comum ou divergências, quem fala mais, tom/jeito de cada uma, com exemplos.`;
+    if ((targets?.groups || []).length > 0) return 'Faça um resumo geral: clima, temas recorrentes, quem mais fala, tom do grupo, com exemplos.';
+    return null;
+}
+
+// Formato do perfil/resumão: INSPIRAÇÃO p/ a IA, nunca template rígido.
+// A IA deve variar títulos, ordem e eixos conforme o caso — o que vale
+// é o espírito (cabeçalho, pitch, bullets, fechamento, lacunas).
+// Só entra em pergunta de perfil/relação — lista de falas, comparação
+// de janelas e factual continuam diretos como antes.
+const SINGLE_FORMAT_HINT = '\n\n[Jeito de responder — inspiração, NÃO siga ao pé da letra: varie títulos, ordem e eixos, use suas palavras]\n' +
+    '• Abra identificando a pessoa com um emoji temático\n' +
+    '• Dê um pitaco inicial de 1 frase resumindo a personalidade\n' +
+    '• Desenvolva em bullets curtos por eixos (ex.: jeito/tom, temas recorrentes, interação, estilo social) com a palavra-chave em *negrito*\n' +
+    '• Feche com 1 linha de conclusão e seja honesto sobre o que não deu pra mapear 🤷\n' +
+    'Estilo: conversacional e descontraído, gíria leve de internet, bastante emoji no fim das frases, frases curtas e diretas, cite falas reais entre aspas como prova. Só use as evidências, nunca invente.';
+
+const MULTI_FORMAT_HINT = '\n\n[Jeito de responder — inspiração, NÃO siga ao pé da letra: varie títulos, ordem e eixos, use suas palavras]\n' +
+    '• Abra identificando as pessoas com um emoji temático\n' +
+    '• Dê 1 frase resumindo cada uma\n' +
+    '• Desenvolva em bullets curtos (ex.: interações, assuntos em comum/divergências, quem fala mais, tom de cada uma) com a palavra-chave em *negrito*\n' +
+    '• Feche com 1 linha sobre a relação e seja honesto sobre o que não deu pra mapear 🤷\n' +
+    'Estilo: conversacional e descontraído, gíria leve de internet, bastante emoji no fim das frases, frases curtas e diretas, cite falas reais entre aspas como prova. Só use as evidências, nunca invente.';
 
 function usage(prefix) {
-    return `🕵️ *!aidono — IA do dono*\n\n` +
+    return `🕵️ *!investigar — IA investigativa*\n\n` +
         `Pergunte sobre pessoas ou grupos citando dados reais:\n` +
-        `• \`${prefix}aidono @fulano o que acha dele?\`\n` +
-        `• \`${prefix}aidono @a @b quem fala mais? (várias menções ok)\`\n` +
-        `• \`${prefix}aidono @fulano o que falou há 3 dias? / ontem? / nessa semana?\`\n` +
-        `• \`${prefix}aidono @fulano o que falou ontem tem a ver com hoje?\`\n` +
-        `• \`${prefix}aidono quantas adv tem @fulano?\` (resposta direta, sem IA)\n` +
-        `• \`${prefix}aidono grupo Amigos como está o clima?\`\n` +
-        `• \`${prefix}aidono quais erros deram hoje?\` / \`${prefix}aidono quais comandos rodaram?\`\n` +
-        `• Responda a mensagem de alguém com \`${prefix}aidono resume essa pessoa\`\n` +
-        `• \`${prefix}aidono investigar quem está causando briga no grupo?\` (pede confirmação antes)\n\n` +
-        `👑 Só dono/subdono/guardião. Somente leitura — nunca pune nem executa ações.`;
+        `• \`${prefix}investigar @fulano o que acha dele?\`\n` +
+        `• \`${prefix}investigar @fulano\` (sem pergunta: resumão geral da pessoa)\n` +
+        `• \`${prefix}investigar @a @b quem fala mais? (várias menções ok)\`\n` +
+        `• \`${prefix}investigar @a @b\` (sem pergunta: relação entre elas)\n` +
+        `• \`${prefix}investigar @fulano o que falou há 3 dias? / ontem? / nessa semana?\`\n` +
+        `• \`${prefix}investigar @fulano o que falou ontem tem a ver com hoje?\`\n` +
+        `• \`${prefix}investigar quantas adv tem @fulano?\` (resposta direta, sem IA)\n` +
+        `• \`${prefix}investigar grupo Amigos como está o clima?\`\n` +
+        `• \`${prefix}investigar quais erros deram hoje?\` / \`${prefix}investigar quais comandos rodaram?\`\n` +
+        `• Responda a mensagem de alguém com \`${prefix}investigar resume essa pessoa\`\n` +
+        `• \`${prefix}investigar tudo quem está causando briga no grupo?\` (modo pesado, pede confirmação antes)\n\n` +
+        `Aberto a todos. Somente leitura — nunca pune nem executa ações.`;
 }
 
 module.exports = {
-    name: 'aidono',
-    aliases: ['iadono'],
+    name: 'investigar',
+    aliases: ['aidono', 'iadono'],
     category: 'ai',
-    description: 'IA do dono: pergunta sobre pessoas/grupos com base nas mensagens (dono/subdono/guardião)',
+    description: 'IA investigativa: pergunta sobre pessoas/grupos com base nas mensagens (aberto a todos)',
     async execute(sock, m, { from, isGroup, sender, fullArgsText, config, utils, model, lastBotResponse, GLOBAL_COOLDOWN, abortSignal, log }) {
         const { react, reactStatus } = utils;
 
-        let access = typeof utils.canConfigureBot === 'function'
-            ? utils.canConfigureBot(sock, m, sender, from)
-            : { ok: false };
-        if (!access.ok && typeof utils.canGuardianActAsync === 'function') {
-            try {
-                const g = await utils.canGuardianActAsync(sock, m, sender, from);
-                if (g && g.ok) access = { ok: true, guardiao: true };
-            } catch (_) {}
-        }
-        if (!access.ok) {
-            return await sock.sendMessage(from, { text: '❌ Apenas o dono, sub-donos ou guardiões podem usar este comando.' }, { quoted: m });
-        }
-
         const prefix = config.prefix || '!';
         const question = String(fullArgsText || '').trim();
-        if (!question) {
-            await sock.sendMessage(from, { text: usage(prefix) }, { quoted: m });
-            return lastBotResponse;
-        }
         if (!model) {
-            try { require('../services/safeDebug').reportSensitive({ title: 'IA sem chave', detail: 'Comando !aidono chamado sem modelo configurado (OPENROUTER_API_KEY ausente).', key: 'ia-sem-chave', cooldownMs: 60 * 60 * 1000 }); } catch (_) {}
+            try { require('../services/safeDebug').reportSensitive({ title: 'IA sem chave', detail: 'Comando !investigar chamado sem modelo configurado (OPENROUTER_API_KEY ausente).', key: 'ia-sem-chave', cooldownMs: 60 * 60 * 1000 }); } catch (_) {}
             await sock.sendMessage(from, { text: '❌ IA indisponível no momento. Fale com o dono do bot.' }, { quoted: m });
             return lastBotResponse;
         }
@@ -101,7 +134,7 @@ module.exports = {
         try {
             const qLower = question.toLowerCase().trim();
 
-            // Resposta a uma confirmação pendente do modo investigar.
+            // Resposta a uma confirmação pendente do modo tudo.
             const pending = getPending(from, sender);
             if (pending && /^(sim|confirmar|confirmo|confirmado|vai|pode ir|ok|yes|bora|s)\s*[.!?]*$/.test(qLower)) {
                 clearPending(from, sender);
@@ -113,13 +146,14 @@ module.exports = {
                 return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
             }
 
-            // Modo investigativo: NÃO roda direto — pede confirmação primeiro
+            // Modo pesado: NÃO roda direto — pede confirmação primeiro
             // (são várias chamadas de IA; evita gasto por digitação errada).
-            const invMatch = question.match(/^investigar\s+(.+)/is);
+            // Aceita `tudo` (novo) e `investigar` (compat com o antigo !aidono).
+            const invMatch = question.match(/^(?:tudo|investigar)\s+(.+)/is);
             if (invMatch) {
                 const investigation = String(invMatch[1] || '').trim();
                 if (!investigation) {
-                    await sock.sendMessage(from, { text: `❌ Descreva o que investigar.\nEx.: \`${prefix}aidono investigar quem está causando briga?\`` }, { quoted: m });
+                    await sock.sendMessage(from, { text: `❌ Descreva o que investigar.\nEx.: \`${prefix}investigar tudo quem está causando briga?\`` }, { quoted: m });
                     return await reactStatus(sock, m, from, false, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
                 }
                 setPending(from, sender, investigation);
@@ -129,14 +163,25 @@ module.exports = {
                         `• Até 4 rodadas de busca + resposta (leva ~1 min)\n` +
                         `• Custo estimado: ~$0,001–0,003\n` +
                         `• Somente leitura — nada será alterado\n\n` +
-                        `Responda \`${prefix}aidono sim\` para confirmar ou \`${prefix}aidono não\` para cancelar (vale por 2 min).`
+                        `Responda \`${prefix}investigar sim\` para confirmar ou \`${prefix}investigar não\` para cancelar (vale por 2 min).`
                 }, { quoted: m });
                 return currentBotResponse;
             }
 
             const targets = await resolveTargets(sock, m, question, utils, from);
+            const explicitPeople = targets.people.length;
+            const explicitGroups = targets.groups.length;
+            // Sem prompt + só marcação: "!investigar @a" (resumão),
+            // "!investigar @a @b" (relação). Também vale p/ resposta
+            // sem texto (quoted) — o alvo vem do contextInfo.
+            // Bare "!investigar" sem alvo continua mostrando o ajuda.
+            if (!question && explicitPeople === 0 && explicitGroups === 0) {
+                await sock.sendMessage(from, { text: usage(prefix) }, { quoted: m });
+                return lastBotResponse;
+            }
             // Sem alvo explícito em grupo: usa o grupo atual como contexto.
-            if (targets.people.length === 0 && targets.groups.length === 0 && isGroup) {
+            // (Só quando há pergunta — bare já saiu acima.)
+            if (targets.people.length === 0 && targets.groups.length === 0 && isGroup && question) {
                 let subject = 'Grupo';
                 try {
                     const gm = await utils.groupMetadataCached(sock, from).catch(() => null);
@@ -144,28 +189,41 @@ module.exports = {
                 } catch (_) {}
                 targets.groups.push({ jid: from, subject });
             }
+            let questionEff = question;
+            let isDefaultSummary = false;
+            if (targets.people.length > 0 || explicitGroups > 0) {
+                const stripped = stripPromptForEmptiness(question, targets);
+                // Resposta citada sem texto também cai aqui (question === '').
+                if (!stripped) {
+                    const def = defaultQuestionFor(targets);
+                    if (def) {
+                        questionEff = def;
+                        isDefaultSummary = true;
+                    }
+                }
+            }
             // Pergunta só sobre logs não precisa de pessoa/grupo.
-            const logOnly = targets.people.length === 0 && targets.groups.length === 0 && wantsLogs(question);
+            const logOnly = targets.people.length === 0 && targets.groups.length === 0 && wantsLogs(questionEff);
             if (targets.people.length === 0 && targets.groups.length === 0 && !logOnly) {
                 await sock.sendMessage(from, { text: `❌ Não identifiquei pessoa nem grupo.\n\n${usage(prefix)}` }, { quoted: m });
                 return await reactStatus(sock, m, from, false, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
             }
 
             const maxPromptLength = Number(config?.aiMaxPromptLength) || 8000;
-            const qShort = question.slice(0, 800);
+            const qShort = questionEff.slice(0, 800);
             // Janela de tempo ("há 3 dias", "ontem"): responde com as falas da
             // janela, direto do histórico de 7 dias (fast-path, sem IA).
             // Comparação ("ontem tem a ver com hoje?"): duas janelas curtas
             // fundidas p/ a IA julgar (fast-path nunca julga).
-            const cmpRanges = rangesForComparison(question);
-            const timeRange = cmpRanges ? cmpRanges[0] : extractTimeRange(question);
+            const cmpRanges = rangesForComparison(questionEff);
+            const timeRange = cmpRanges ? cmpRanges[0] : extractTimeRange(questionEff);
             // Build ÚNICO (antes eram até 4 rebuilds [14,10,6,3] que varriam o
             // banco 4x com muito dado). Se estourar o teto, corta o texto
             // mantendo as linhas mais novas — sem re-consultar o SQLite.
             const fitBudget = (text) => OWNER_SYSTEM.length + text.length + qShort.length + 60 <= maxPromptLength;
             let evidence = null;
             if (cmpRanges && (targets.people.length > 0 || targets.groups.length > 0)) {
-                evidence = await buildComparisonEvidence(sock, targets, { from, isGroup, utils, question, ranges: cmpRanges, msgLimit: 12 });
+                evidence = await buildComparisonEvidence(sock, targets, { from, isGroup, utils, question: questionEff, ranges: cmpRanges, msgLimit: 12 });
                 if (!fitBudget(evidence.text)) {
                     const budget = Math.max(500, maxPromptLength - OWNER_SYSTEM.length - qShort.length - 60);
                     const lines = evidence.text.split('\n');
@@ -182,12 +240,13 @@ module.exports = {
                 // Perfil/resumão sem janela ("o que ela gosta?", "resume essa
                 // pessoa"): amostra maior e espalhada no período — não só as
                 // últimas. Linhas mais curtas p/ caber ~30 no mesmo teto.
-                const isProfile = !timeRange && wantsProfileSummary(question) && targets.people.length > 0;
+                // Resumo padrão (sem prompt) sempre usa esse modo.
+                const isProfile = !timeRange && targets.people.length > 0 && (isDefaultSummary || wantsProfileSummary(questionEff));
                 evidence = await buildEvidence(sock, targets, {
                     from, isGroup, utils,
                     msgLimit: isProfile ? 30 : 20,
                     msgChars: isProfile ? 160 : 220,
-                    groupMsgChars: 180, question, timeRange
+                    groupMsgChars: 180, question: questionEff, timeRange
                 });
                 if (!fitBudget(evidence.text)) {
                     const budget = Math.max(500, maxPromptLength - OWNER_SYSTEM.length - qShort.length - 60);
@@ -237,7 +296,7 @@ module.exports = {
                     }
                 }
             }
-            try { log?.('aidono evidencia', `${evidence.text.length} chars${evidence.truncated ? ' (cortada p/ teto)' : ''} windowTotal=${JSON.stringify((evidence.stats?.people || []).map((p) => p.windowTotal))}`); } catch (_) {}
+            try { log?.('investigar evidencia', `${evidence.text.length} chars${evidence.truncated ? ' (cortada p/ teto)' : ''} windowTotal=${JSON.stringify((evidence.stats?.people || []).map((p) => p.windowTotal))}`); } catch (_) {}
             if (!evidence.text || evidenceIsEmpty(evidence.stats)) {
                 const who = (evidence.stats?.people || []).map((p) => p.label).filter(Boolean).join(', ');
                 const win = cmpRanges ? ` ${cmpRanges[0].label} × ${cmpRanges[1].label}` : (timeRange ? ` ${timeRange.label}` : '');
@@ -255,13 +314,14 @@ module.exports = {
             }
 
             // Fast-path factual (R$0, sem IA).
-            const factual = matchFactual(question, evidence, { isGroup, from, utils });
+            // Resumo padrão nunca vai no fast-path: sempre gera perfil/relação via IA.
+            const factual = isDefaultSummary ? null : matchFactual(questionEff, evidence, { isGroup, from, utils });
             if (factual) {
                 await sock.sendMessage(from, { text: factual }, { quoted: m });
                 return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
             }
 
-            const finalPrompt = `${OWNER_SYSTEM}\n\n[Evidências]\n${evidence.text}\n\nPergunta do dono:\n${qShort}`;
+            const finalPrompt = `${OWNER_SYSTEM}\n\n[Evidências]\n${evidence.text}\n\nPergunta:\n${qShort}${((isDefaultSummary || wantsProfileSummary(questionEff)) && !cmpRanges) ? (targets.people.length >= 2 ? MULTI_FORMAT_HINT : SINGLE_FORMAT_HINT) : ''}`;
             const result = await model.generateContent(finalPrompt, { signal: abortSignal });
             if (abortSignal?.aborted) return currentBotResponse;
             const text = String(result.response.text() ?? '').trim();
@@ -271,7 +331,7 @@ module.exports = {
             return await reactStatus(sock, m, from, true, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);
         } catch (e) {
             if (e?.code === 'ABORTED' || abortSignal?.aborted) return currentBotResponse;
-            console.error('❌ [AIDONO] Erro:', e?.response?.data || e.message || e);
+            console.error('❌ [INVESTIGAR] Erro:', e?.response?.data || e.message || e);
             const msg = String(e?.message || '');
             await sock.sendMessage(from, { text: /resposta vazia/i.test(msg) ? '❌ A IA retornou resposta vazia. Tente de novo.' : '❌ Falha ao consultar. Tente novamente.' }, { quoted: m });
             return await reactStatus(sock, m, from, false, '✅', '❌', currentBotResponse, GLOBAL_COOLDOWN);

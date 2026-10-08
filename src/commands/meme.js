@@ -6,7 +6,7 @@ module.exports = {
     category: 'mídia',
     description: 'Sorteia um meme aleatório do acervo (!meme)',
     async execute(sock, m, { from, isGroup, config, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
-        const { react, groupMetadataCached } = utils;
+        const { react } = utils;
         let current = await react(sock, m, '😂', lastBotResponse, GLOBAL_COOLDOWN);
 
         const total = memeStore.countMemes();
@@ -17,14 +17,7 @@ module.exports = {
             return current;
         }
 
-        // Anti-spam por grupo: 30s entre sorteios
-        if (isGroup) {
-            const wait = memeStore.checkMemeGroupCooldown(from);
-            if (wait > 0) {
-                await sock.sendMessage(from, { text: `⏳ Calma! Aguarde *${Math.ceil(wait / 1000)}s* para sortear outro meme.` }, { quoted: m });
-                return current;
-            }
-        }
+        // Sem delay/cooldown — sorteio imediato (pedido do dono).
 
         const { meme, cycled } = memeStore.pickRandomMeme(isGroup ? from : null);
         if (!meme) {
@@ -37,14 +30,8 @@ module.exports = {
             return await react(sock, m, '❌', current, GLOBAL_COOLDOWN);
         }
 
-        let groupName = '—';
-        if (isGroup) {
-            try {
-                const meta = await groupMetadataCached(sock, from).catch(() => null);
-                if (meta?.subject) groupName = meta.subject;
-            } catch (_) {}
-        }
-        const caption = memeStore.buildMemeCaption(meme, isGroup ? groupName : 'privado')
+        // Mostra o grupo de ORIGEM (onde foi postado) ou "privado" — não o grupo atual.
+        const caption = memeStore.buildMemeCaption(meme)
             + (cycled ? `\n\n🔄 *Ciclo reiniciado — todos os memes já foram vistos aqui!*` : '');
         await sock.sendMessage(from, { image: buf, caption }, { quoted: m });
         if (isGroup) memeStore.recordMemeSend(from, meme.id);

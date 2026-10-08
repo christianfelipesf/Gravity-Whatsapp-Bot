@@ -10,7 +10,7 @@ const H = 3600 * 1000;
 // meia-noite SP de um dia (mês 0-based, dia): UTC = dayUtc + 3h
 const spMid = (m, d) => Date.UTC(2026, m, d) + 3 * H;
 
-describe('!aidono — janela de tempo (extractTimeRange)', () => {
+describe('!investigar — janela de tempo (extractTimeRange)', () => {
     it('ontem', () => {
         const r = ev.extractTimeRange('o que o @fulano falou ontem?', NOW);
         assert.strictEqual(r.since, spMid(8, 29));
@@ -64,7 +64,7 @@ describe('!aidono — janela de tempo (extractTimeRange)', () => {
     });
 });
 
-describe('!aidono — comparação entre janelas', () => {
+describe('!investigar — comparação entre janelas', () => {
     it('extractAllTimeRanges acha ontem + hoje', () => {
         const all = ev.extractAllTimeRanges('o que ela falou ontem tem a ver com o que fala hoje?', NOW);
         assert.strictEqual(all.length, 2);
@@ -112,7 +112,7 @@ describe('!aidono — comparação entre janelas', () => {
     });
 });
 
-describe('!aidono — fusão exato+aproximado (mergeMsgLists)', () => {
+describe('!investigar — fusão exato+aproximado (mergeMsgLists)', () => {
     const T0 = spMid(8, 30);
     it('dedupe dobra gravação (mesmo texto a 2s)', () => {
         const out = ev.mergeMsgLists(
@@ -154,7 +154,7 @@ describe('!aidono — fusão exato+aproximado (mergeMsgLists)', () => {
     });
 });
 
-describe('!aidono — wantsSpoken separa fala de opinião', () => {
+describe('!investigar — wantsSpoken separa fala de opinião', () => {
     it('fala vai no fast-path', () => {
         assert.ok(ev.wantsSpoken('o que a Ana falou ontem?'));
         assert.ok(ev.wantsSpoken('mostra as mensagens dele há 3 dias'));
@@ -166,7 +166,7 @@ describe('!aidono — wantsSpoken separa fala de opinião', () => {
     });
 });
 
-describe('!aidono — evidência com janela + resposta direta', () => {
+describe('!investigar — evidência com janela + resposta direta', () => {
     const stub = {
         normalizeJid: (j) => String(j || '').toLowerCase(),
         getGroupData: () => ({ warnings: {} }),
