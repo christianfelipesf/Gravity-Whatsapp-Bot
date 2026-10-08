@@ -1,5 +1,5 @@
 // Origem aproximada pelo número (DDI/DDD) — sem API externa, offline.
-// DDD cobre a área, não a cidade exata. Cidade exata só via !ficha.
+// DDD cobre a área, não a cidade exata.
 
 const DDI_PAIS = {
     '1': { pais: 'EUA/Canadá', iso: 'US' },

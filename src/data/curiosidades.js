@@ -31,11 +31,8 @@ const CURIOSIDADES = [
     'Dica: !perfil mostra sua foto e suas estatísticas no grupo.',
     'Dica: !inativos mostra quem anda sumido do grupo. 👀',
     'Dica: !infogrupo mostra horários de pico e movimento da semana.',
-    // --- Fichas e diversão ---
-    'Dica: !ficha <nome> abre a ficha cadastrada de alguém.',
-    'Dica: !aniversariantes lista quem faz aniversário neste mês.',
-    'Dica: !radar-cidades agrupa todas as fichas por cidade.',
-    'Dica: !aleatorio sorteia uma ficha cadastrada aleatória.',
+    // --- Diversão ---
+    'Dica: !sortear sorteia um membro aleatório de um grupo onde o bot é admin. 🎲',
     'Dica: !enquete <pergunta> cria uma votação rápida no grupo.',
     // --- Interação ---
     'Dica: !comandosinteracao lista todos os comandos de interação (beijo, abraço, tapa...).',

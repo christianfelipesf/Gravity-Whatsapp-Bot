@@ -1,10 +1,12 @@
+const { listCandidateGroupJids, checkGroup, getGroupInviteLink } = require('../services/adminGroups');
+
 module.exports = {
     name: 'redegravity',
     aliases: ['redegravidade', 'redegrav', 'rede-gravity', 'gruposgravity'],
     category: 'admin',
     description: 'Lista os links dos grupos onde o bot está e é admin. Dono, sub-donos e guardiões.',
     async execute(sock, m, { from, sender, config, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
-        const { react, groupMetadataCached, botIsAdmin } = utils;
+        const { react } = utils;
 
         let access = utils.canConfigureBot
             ? utils.canConfigureBot(sock, m, sender, from)
@@ -22,56 +24,34 @@ module.exports = {
         let currentBotResponse = lastBotResponse;
         try { currentBotResponse = await react(sock, m, '🌐', lastBotResponse, GLOBAL_COOLDOWN); } catch (_) {}
 
-        // 1) Descobre os grupos onde o bot está.
-        let jids = [];
-        try {
-            if (sock && typeof sock.groupFetchAllParticipating === 'function') {
-                const p = await sock.groupFetchAllParticipating();
-                if (p && typeof p === 'object') jids = Object.keys(p);
-            }
-        } catch (_) {}
-        if (!jids.length) {
-            try {
-                const extra = [
-                    ...(typeof utils.listActiveGroups === 'function' ? utils.listActiveGroups() : []),
-                    ...(typeof utils.listPartialGroups === 'function' ? utils.listPartialGroups() : []),
-                    ...(typeof utils.listNewsGroups === 'function' ? utils.listNewsGroups() : []),
-                ];
-                jids = [...new Set(extra.filter((j) => j && String(j).endsWith('@g.us')))];
-            } catch (_) {}
-        }
-        jids = [...new Set((jids || []).filter((j) => j && String(j).endsWith('@g.us')))];
+        // 1) Universo de grupos (socket + listas locais + dashboard).
+        const jids = await listCandidateGroupJids(sock, utils).catch(() => []);
 
         if (!jids.length) {
             return await sock.sendMessage(from, { text: '🌐 *Rede Gravity* 🪐\n\nNão achei nenhum grupo (bot fora de grupos ou sem conexão). Tente de novo em alguns segundos.' }, { quoted: m });
         }
 
-        // 2) Filtra só onde o bot é admin e puxa o invite.
+        // 2) Checa admin (robusto a LID x número) e puxa o invite.
         const ok = [];
         let semAdmin = 0;
-        const falhas = [];
+        let inacessiveis = 0;
+        const semLink = [];
         for (const jid of jids) {
-            let isAdmin = false;
-            try { isAdmin = await botIsAdmin(sock, jid); } catch (_) { isAdmin = false; }
-            if (!isAdmin) { semAdmin++; continue; }
-            let subject = 'Grupo';
-            let members = null;
-            try {
-                const meta = await groupMetadataCached(sock, jid).catch(() => null);
-                if (meta?.subject) subject = meta.subject;
-                if (Array.isArray(meta?.participants)) members = meta.participants.length;
-            } catch (_) {}
-            try {
-                const code = await sock.groupInviteCode(jid);
-                ok.push({ jid, subject, members, link: `https://chat.whatsapp.com/${code}` });
-            } catch (e) {
-                falhas.push({ jid, subject });
-            }
+            let info = null;
+            try { info = await checkGroup(sock, jid, utils); } catch (_) { info = null; }
+            if (!info || !info.reachable) { inacessiveis++; continue; }
+            if (!info.admin) { semAdmin++; continue; }
+            const link = await getGroupInviteLink(sock, jid);
+            if (link) ok.push({ jid, subject: info.subject, members: info.memberCount, link });
+            else semLink.push({ jid, subject: info.subject });
         }
 
         if (!ok.length) {
+            const detalhe = semLink.length
+                ? `\n\n⚠️ *Com admin mas sem link:* ${semLink.map((g) => g.subject).join(' • ')} _(convite bloqueado?)_`
+                : '';
             return await sock.sendMessage(from, {
-                text: `🌐 *Rede Gravity* 🪐\n\nEstou em *${jids.length}* grupo(s), mas *não sou admin em nenhum* — por isso não consigo gerar links.\n\n💡 Promova o bot a admin nos grupos para aparecerem aqui.\n${falhas.length ? `\n⚠️ ${falhas.length} grupo(s) com admin mas sem link (convite bloqueado?).` : ''}`
+                text: `🌐 *Rede Gravity* 🪐\n\nVerifiquei *${jids.length}* grupo(s), mas *nenhum com link* — ${semAdmin} sem admin${inacessiveis ? `, ${inacessiveis} inacessível(is)` : ''}.\n\n💡 Promova o bot a admin nos grupos para aparecerem aqui.${detalhe}`
             }, { quoted: m });
         }
 
@@ -79,7 +59,7 @@ module.exports = {
 
         const lines = ok.map((g, i) => `${i + 1}. *${g.subject}*${g.members != null ? ` (${g.members})` : ''}\n   🔗 ${g.link}`);
         const header = `🌐 *Rede Gravity* 🪐 (${ok.length})\n_links dos grupos onde sou admin_\n\n`;
-        const footer = `\n\n📊 ${jids.length} grupo(s) no total • ✅ ${ok.length} com link${semAdmin ? ` • 🙈 ${semAdmin} sem admin` : ''}${falhas.length ? ` • ⚠️ ${falhas.length} falha(s)` : ''}`;
+        const footer = `\n\n📊 ${jids.length} verificado(s) • ✅ ${ok.length} com link${semAdmin ? ` • 🙈 ${semAdmin} sem admin` : ''}${semLink.length ? ` • ⚠️ ${semLink.length} sem link: ${semLink.map((g) => g.subject).join(' • ')}` : ''}${inacessiveis ? ` • ❓ ${inacessiveis} inacessível(is)` : ''}`;
         const full = header + lines.join('\n') + footer;
 
         // Mensagem longa demais vira arquivo .txt para não estourar o limite.

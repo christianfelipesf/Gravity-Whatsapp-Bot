@@ -17,9 +17,7 @@ const PARTIAL_BLOCKED_COMMANDS = new Set([
     'dashboardativar', 'dashboarddesativar', 'newsativar', 'newsdesativar', 'dump', 'config', 'nome', 'tema', 'theme',
     'log', 'logs', 'logsterminal', 'terminallog',
     'menu', 'help', 'comandos', 'prefixo', 'prefix', 'resumir', 'grupos', 'perfil', 'ai',
-    'cadastrar-pessoa', 'cadastrar', 'addpessoa', 'editar-pessoa', 'editar', 'deletar-pessoa', 'delficha',
-    'ficha', 'pessoa', 'listar-pessoas', 'fichas', 'aniversariantes', 'niver', 'radar-cidades', 'radar',
-    'aleatorio', 'sortear', 'contato', 'pix',
+    'sortear', 'sorteio', 'aleatorio', 'random',
     'postarmeme', 'novomeme', 'memenovo', 'delmeme', 'deletememe', 'apagarmeme'
 ]);
 // Bypass passa mesmo em parcial (controle + status). 'status' NÃO está no

@@ -29,6 +29,7 @@ module.exports = {
             `${B} 🌐 *${p}traduzir* <texto> — traduz\n` +
             `${B} 📖 *${p}tutorial* — guia de uso\n` +
             `${B} 📝 *${p}resumir* — resume conversa\n` +
+            `${B} 🎲 *${p}sortear* — sorteia um membro de grupo aleatório\n` +
             `${B} 📝 *${p}relatar* bug|sugestao <msg> — reportar (atalhos ${p}bug, ${p}sugestao)\n` +
             `${B} 🎨 *${p}tema* <nome|reset> — troca o tema (só admin)\n` +
             `╰───────────────\n\n` +

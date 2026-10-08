@@ -2742,150 +2742,13 @@ function getGroupCommandsToday(jid) {
     } catch (_) { return 0; }
 }
 
-// ============================================================
-// Fichas de pessoas (!ficha) — escopo global
-// ============================================================
-function _pessoaStmts() {
-    return {
-        get: db.prepare('SELECT * FROM pessoas WHERE nome_norm = ?'),
-        search: db.prepare("SELECT * FROM pessoas WHERE nome LIKE '%' || ? || '%' ESCAPE '\\' ORDER BY nome ASC LIMIT ?"),
-        list: db.prepare('SELECT * FROM pessoas ORDER BY nome ASC LIMIT ? OFFSET ?'),
-        count: db.prepare('SELECT COUNT(*) as c FROM pessoas'),
-        byMonth: db.prepare("SELECT * FROM pessoas WHERE nascimento IS NOT NULL AND substr(nascimento, 6, 2) = ? ORDER BY substr(nascimento, 9, 2) ASC"),
-        byCity: db.prepare('SELECT * FROM pessoas WHERE cidade LIKE ? ESCAPE \'\\\' ORDER BY nome ASC'),
-        cityGroups: db.prepare('SELECT cidade, COUNT(*) as total FROM pessoas WHERE cidade IS NOT NULL AND cidade != \'\' GROUP BY cidade ORDER BY total DESC, cidade ASC'),
-        random: db.prepare('SELECT * FROM pessoas ORDER BY RANDOM() LIMIT 1'),
-        upsert: db.prepare(`INSERT INTO pessoas (nome, nome_norm, nascimento, cidade, descricao, status, hobby, pix, instagram, linkedin, foto_path, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(nome_norm) DO UPDATE SET nome=excluded.nome, nascimento=excluded.nascimento, cidade=excluded.cidade, descricao=excluded.descricao, status=excluded.status, hobby=excluded.hobby, pix=excluded.pix, instagram=excluded.instagram, linkedin=excluded.linkedin, foto_path=COALESCE(excluded.foto_path, pessoas.foto_path), updated_at=excluded.updated_at`),
-        update: db.prepare('UPDATE pessoas SET nome = COALESCE(?, nome), nascimento = COALESCE(?, nascimento), cidade = COALESCE(?, cidade), descricao = COALESCE(?, descricao), status = COALESCE(?, status), hobby = COALESCE(?, hobby), pix = COALESCE(?, pix), instagram = COALESCE(?, instagram), linkedin = COALESCE(?, linkedin), foto_path = COALESCE(?, foto_path), updated_at = ? WHERE nome_norm = ?'),
-        del: db.prepare('DELETE FROM pessoas WHERE nome_norm = ?'),
-        clearFoto: db.prepare('UPDATE pessoas SET foto_path = NULL, updated_at = ? WHERE nome_norm = ?')
-    };
-}
+// (sistema de fichas removido — tabela pessoas preservada no banco, sem código ativo)
 
-function _normPessoa(nome) {
-    try { return require('../services/ficha').normalizeNome(nome); }
-    catch (_) { return String(nome || '').trim().toLowerCase().slice(0, 40); }
-}
+// (removido: upsertPessoa/getPessoa/searchPessoas/listPessoas/countPessoas)
 
-function _escapeLike(s) {
-    return String(s || '').replace(/[\\%_]/g, (c) => '\\' + c);
-}
+// (removido: deletePessoa/updatePessoa/clearPessoaFoto/aniversariantes/pessoasPorCidade/agruparCidades/pessoaAleatoria)
 
-function upsertPessoa(data = {}) {
-    const nome = String(data.nome || '').trim().slice(0, 40);
-    if (nome.length < 2) return { ok: false, error: 'Nome muito curto (mín. 2 letras).' };
-    try {
-        const check = require('../services/ficha').isValidPessoaNome(nome);
-        if (check && !check.ok) return { ok: false, error: check.reason };
-    } catch (_) {}
-    const nomeNorm = _normPessoa(nome);
-    if (!nomeNorm) return { ok: false, error: 'Nome inválido.' };
-    try {
-        const s = _pessoaStmts();
-        const prev = s.get.get(nomeNorm) || null;
-        const now = Date.now();
-        const pick = (k) => (data[k] !== undefined ? data[k] : (prev ? prev[k] : null));
-        s.upsert.run(nome, nomeNorm, pick('nascimento'), pick('cidade'), pick('descricao'), pick('status'), pick('hobby'), pick('pix'), pick('instagram'), pick('linkedin'), data.foto_path !== undefined ? data.foto_path : (prev ? prev.foto_path : null), data.created_by || (prev ? prev.created_by : null), prev ? prev.created_at : now, now);
-        _pushSoon();
-        return { ok: true, created: !prev };
-    } catch (e) { return { ok: false, error: e.message }; }
-}
-
-function getPessoa(nome) {
-    const norm = _normPessoa(nome);
-    if (!norm) return null;
-    try { return _pessoaStmts().get.get(norm) || null; } catch (_) { return null; }
-}
-
-function searchPessoas(term, limit = 5) {
-    const t = String(term || '').trim().slice(0, 40);
-    if (!t) return [];
-    try { return _pessoaStmts().search.all(_escapeLike(t), Math.max(1, Math.min(10, Number(limit) || 5))) || []; } catch (_) { return []; }
-}
-
-function listPessoas(limit = 10, offset = 0) {
-    try {
-        const lim = Math.max(1, Math.min(50, Number(limit) || 10));
-        const off = Math.max(0, Number(offset) || 0);
-        return _pessoaStmts().list.all(lim, off) || [];
-    } catch (_) { return []; }
-}
-
-function countPessoas() {
-    try { const r = _pessoaStmts().count.get(); return r ? r.c : 0; } catch (_) { return 0; }
-}
-
-function deletePessoa(nome) {
-    const norm = _normPessoa(nome);
-    if (!norm) return false;
-    try { const ok = _pessoaStmts().del.run(norm).changes > 0; if (ok) _pushSoon(); return ok; } catch (_) { return false; }
-}
-
-function updatePessoa(nome, patch = {}) {
-    const norm = _normPessoa(nome);
-    if (!norm) return { ok: false, error: 'Nome inválido.' };
-    try {
-        const s = _pessoaStmts();
-        const prev = s.get.get(norm);
-        if (!prev) return { ok: false, error: 'Ficha não encontrada.' };
-        const novoNome = patch.nome !== undefined ? String(patch.nome).trim().slice(0, 40) : null;
-        if (novoNome !== null && novoNome.length < 2) return { ok: false, error: 'Novo nome muito curto.' };
-        if (novoNome) {
-            try {
-                const check = require('../services/ficha').isValidPessoaNome(novoNome);
-                if (check && !check.ok) return { ok: false, error: check.reason };
-            } catch (_) {}
-        }
-        const r = s.update.run(novoNome || null, patch.nascimento !== undefined ? patch.nascimento : null, patch.cidade !== undefined ? patch.cidade : null, patch.descricao !== undefined ? patch.descricao : null, patch.status !== undefined ? patch.status : null, patch.hobby !== undefined ? patch.hobby : null, patch.pix !== undefined ? patch.pix : null, patch.instagram !== undefined ? patch.instagram : null, patch.linkedin !== undefined ? patch.linkedin : null, patch.foto_path !== undefined ? patch.foto_path : null, Date.now(), norm);
-        if (novoNome) {
-            try {
-                const newNorm = _normPessoa(novoNome);
-                if (newNorm && newNorm !== norm) db.prepare('UPDATE pessoas SET nome_norm = ? WHERE nome_norm = ?').run(newNorm, norm);
-            } catch (_) {}
-        }
-        if (r.changes > 0) _pushSoon();
-        return { ok: r.changes > 0 };
-    } catch (e) { return { ok: false, error: e.message }; }
-}
-
-function clearPessoaFoto(nome) {
-    const norm = _normPessoa(nome);
-    if (!norm) return false;
-    try { const ok = _pessoaStmts().clearFoto.run(Date.now(), norm).changes > 0; if (ok) _pushSoon(); return ok; } catch (_) { return false; }
-}
-
-function aniversariantes(mes) {
-    const mm = String(mes).padStart(2, '0');
-    if (!/^(0[1-9]|1[0-2])$/.test(mm)) return [];
-    try { return _pessoaStmts().byMonth.all(mm) || []; } catch (_) { return []; }
-}
-
-function pessoasPorCidade(cidade) {
-    const c = String(cidade || '').trim();
-    if (!c) return [];
-    try { return _pessoaStmts().byCity.all(`%${_escapeLike(c)}%`) || []; } catch (_) { return []; }
-}
-
-function agruparCidades() {
-    try { return _pessoaStmts().cityGroups.all() || []; } catch (_) { return []; }
-}
-
-function pessoaAleatoria() {
-    try { return _pessoaStmts().random.get() || null; } catch (_) { return null; }
-}
-
-async function saveFichaPhoto(buffer, nomeNorm) {
-    if (!buffer || buffer.length > 5 * 1024 * 1024) throw new Error('Imagem muito grande (max 5MB)');
-    const hash = crypto.createHash('md5').update(String(nomeNorm || Date.now())).digest('hex');
-    const fileName = `ficha_${hash}.jpg`;
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-    const filePath = path.join(uploadsDir, fileName);
-    await sharp(buffer, { failOn: 'none' }).rotate().resize({ width: 512, height: 512, fit: 'cover' }).jpeg({ quality: 85 }).toFile(filePath);
-    return `uploads/${fileName}`;
-}
+// (removido: saveFichaPhoto)
 
 // ============================================================
 // Helper functions
@@ -3222,8 +3085,6 @@ module.exports = {
     upsertDashboardGroupInfo, getDashboardGroupInfo, listDashboardGroupInfos, deleteDashboardGroupInfo,
     insertDashboardVisit, getActiveUsers, getVisitHistory, cleanupDashboardVisits,
     addFeedback, listFeedback, countFeedback, clearFeedback, FEEDBACK_MAX, FEEDBACK_LIMIT,
-    upsertPessoa, getPessoa, searchPessoas, listPessoas, countPessoas, deletePessoa, updatePessoa, clearPessoaFoto,
-    aniversariantes, pessoasPorCidade, agruparCidades, pessoaAleatoria, saveFichaPhoto,
     flushNow, checkpointWal,
     DEFAULT_CONFIG,
     getDefaultConfig: () => ({ ...DEFAULT_CONFIG })
