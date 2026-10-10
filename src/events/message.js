@@ -363,6 +363,17 @@ async function _handleSingleMessage(sock, m, { commands, config, startTime }) {
                 } catch (_) {}
             }
 
+            // === Tag global (!tag on/off): reage a msgs normais (não-comandos) ===
+            // Dono/sub 🤡, guardião 🦅, membro comum sem reação. Fire-and-forget.
+            if (!matchedPrefix && isGroup && (botActive || isPartialActive(from)) && !m.key.fromMe && text) {
+                try {
+                    const tag = require('../services/tagReact');
+                    if (tag.isTagEnabled()) {
+                        tag.maybeTagReact(sock, m, { from, sender }).catch(() => {});
+                    }
+                } catch (_) {}
+            }
+
             // === Command detection (multiprefixo: aceita qualquer prefixo válido) ===
             if (!matchedPrefix) return;
             const args = text.slice(matchedPrefix.length).trim().split(/ +/);

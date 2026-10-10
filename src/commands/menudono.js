@@ -64,7 +64,7 @@ module.exports = {
             `│ 📋 *${p}listsubdonos* — lista sub-donos\n` +
             `╰───────────────\n\n` +
             `╭─── *GUARDIÕES (dono + sub-dono)* ───\n` +
-            `│ 🛡️ *${p}addguardiao* <numero> — dá poder de guardião: ativar, parcial, news, investigartudo, mutar, apagar e rede ✨\n` +
+            `│ 🛡️ *${p}addguardiao* <numero> — dá poder de guardião: ativar, parcial, news, investigartudo, mutar, apagar msg do bot, tag e rede ✨\n` +
             `│ ➖ *${p}remguardiao* <numero|all> — remove guardião\n` +
             `│ 📋 *${p}menuguardiao* — menu + lista dos guardiões\n` +
             `╰───────────────\n\n` +

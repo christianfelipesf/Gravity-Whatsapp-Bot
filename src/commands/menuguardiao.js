@@ -63,7 +63,8 @@ module.exports = {
             `│ 💬 *${p}autoresponder* on|off — bate-papo automático\n` +
             `│ 🔇 *${p}mutar* @user — silencia (apaga msgs, bot precisa ser admin)\n` +
             `│ 🔊 *${p}desmutar* @user — dessilencia\n` +
-            `│ 🗑️ *${p}d* (responda msg) — apaga msg do bot (mesmo sem admin) ou de pessoas\n` +
+            `│ 🗑️ *${p}d* (responda msg do bot) — apaga msg do bot (mesmo sem admin)\n` +
+            `│ 🏷️ *${p}tag* on|off — tag global (🤡 dono/sub, 🦅 guardião)\n` +
             `│ 🌐 *${p}redegravity* — links dos grupos onde o bot é admin\n` +
             `│ 📊 *${p}statusgrupos* — métricas de hoje de todos os grupos\n` +
             `╰───────────────\n\n` +

@@ -14,6 +14,23 @@ const { normalizeLang, parseLangFromQuery } = require('../services/downloaderCor
 const { withChannelContext } = require('../services/channelPromo');
 const { sanitizeUserText } = require('../services/safeDebug');
 
+// Só dono e sub-dono podem baixar mídia (evita abuso / custo em grupos).
+async function assertOwnerOrSub(sock, m, sender, from, utils) {
+    try {
+        if (typeof utils.isBotOwner === 'function' && utils.isBotOwner(sock, m, sender)) return true;
+    } catch (_) {}
+    try {
+        if (typeof utils.canConfigureBot === 'function' && utils.canConfigureBot(sock, m, sender, from).ok) return true;
+    } catch (_) {}
+    try {
+        if (typeof utils.isSubOwnerSenderAsync === 'function') {
+            const r = await utils.isSubOwnerSenderAsync(sock, m, sender, from);
+            if (r && (r.ok || r.owner)) return true;
+        }
+    } catch (_) {}
+    return false;
+}
+
 function parseDurationToSeconds(d) {
     if (typeof d === 'number' && Number.isFinite(d)) return d;
     if (typeof d === 'string') {
@@ -88,8 +105,11 @@ module.exports = {
     name: 'play',
     aliases: ['p', 'musica', 'youtube'],
     category: 'mídia',
-    description: 'Baixa áudio do YouTube (limite configurável, padrão 15 min)',
-    async execute(sock, m, { from, fullArgsText, utils, lastBotResponse, GLOBAL_COOLDOWN, config, getSock }) {
+    description: 'Baixa áudio do YouTube (limite configurável, padrão 15 min) — só dono/sub-dono',
+    async execute(sock, m, { from, sender, fullArgsText, utils, lastBotResponse, GLOBAL_COOLDOWN, config, getSock }) {
+        if (!(await assertOwnerOrSub(sock, m, sender, from, utils))) {
+            try { return await utils.react(sock, m, '❌', lastBotResponse, GLOBAL_COOLDOWN); } catch (_) { return lastBotResponse; }
+        }
         const { react, reactStatus } = utils;
         // Tag nos logs p/ distinguir sub-sessão do principal (sub passa botName 'Sub-sessão').
         const isSub = config?.botName === 'Sub-sessão';

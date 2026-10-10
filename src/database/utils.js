@@ -556,8 +556,9 @@ function removeSubOwner(phoneOrJid) {
 // Guardiões (!addguardiao / !remguardiao) — papel LIMITADO:
 // !ativar/!desativar/!ativarp/!desativarp, !news ativar/desativar,
 // !investigartudo, !autoresponder on/off, !mutar/!desmutar, !d (deletarmsg:
-// msg do próprio bot mesmo sem bot-admin, msg de terceiros exige bot-admin),
-// !redegravity, !statusgrupos e !menuguardiao. NUNCA !set/!config/chaves API (não passam em
+// SÓ msg do próprio bot; msg de terceiros é bloqueada p/ guardião puro em
+// deletarmsg.js — só admin/sub-dono/dono apagam de terceiros),
+// !redegravity, !statusgrupos, !tag on/off e !menuguardiao. NUNCA !set/!config/chaves API (não passam em
 // canConfigureBot de propósito). Armazenado em config.guardioes.
 // Gerenciados pelo dono real E por sub-donos.
 // ============================================================
@@ -627,7 +628,7 @@ async function isGuardiaoSenderAsync(sock, m, sender, from) {
 // Portão do guardião: dono OU sub-dono OU guardião.
 // Usado SÓ em: !ativar/!desativar/!ativarp/!desativarp,
 // !news ativar/desativar, !investigartudo, !autoresponder, !mutar/!desmutar,
-// !d (deletarmsg), !redegravity, !statusgrupos e !menuguardiao. Nunca em !set/!config.
+// !d (deletarmsg), !redegravity, !statusgrupos, !tag on/off e !menuguardiao. Nunca em !set/!config.
 async function canGuardianActAsync(sock, m, sender, from) {
     try {
         if (isBotOwner(sock, m, sender)) return { ok: true, owner: true, sub: false, guardiao: false };
@@ -740,7 +741,7 @@ const DEFAULT_CONFIG = {
     subOwners: ['5598989138217'],
     // Guardiões: papel limitado (!ativar/!desativar/!ativarp/!desativarp,
     // !news, !investigartudo, !autoresponder, !mutar/!desmutar, !d, !redegravity,
-    // !statusgrupos, !menuguardiao). Gerenciados pelo dono E por sub-donos
+    // !statusgrupos, !menuguardiao, !tag on/off). Gerenciados pelo dono E por sub-donos
     // via !addguardiao/!remguardiao (nunca via !set).
     guardioes: [],
     // Tema global (!temaglobal, dono+subdono): quando ativado, substitui
@@ -825,7 +826,10 @@ const DEFAULT_CONFIG = {
     // --- Broadcast seguro (anti-ban): delay longo entre grupos ---
     broadcastMinDelayMs: 30000,
     broadcastMaxDelayMs: 60000,
-    broadcastVaryText: true
+    broadcastVaryText: true,
+    // --- Tag global (!tag on/off, dono/sub+guardião): reage a msgs normais
+    // (não-comandos) — dono/sub com 🤡, guardião com 🦅. Membro comum: sem reação.
+    tagMode: false
 };
 
 let _configCache = null;

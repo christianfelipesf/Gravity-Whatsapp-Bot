@@ -39,9 +39,9 @@ module.exports = {
             `${B} 🔓 *${p}revelar* — revela view once\n` +
             `${B} 🔄 *${p}toimg* — sticker → mídia (alias: togif/gif)\n` +
             `${B} ✨ *${p}stexto* <texto> — sticker de texto\n` +
-            `${B} 🎵 *${p}play* <nome> — baixa música\n` +
-            `${B} 📥 *${p}dl* <link> — download\n` +
-            `${B} 📥 *${p}dhd* <link> — download HD\n` +
+            `${B} 🎵 *${p}play* <nome> — baixa música 👑\n` +
+            `${B} 📥 *${p}dl* <link> — download 👑\n` +
+            `${B} 📥 *${p}dhd* <link> — download HD 👑\n` +
             `${B} 🗣️ *${p}tts* <texto> — texto → áudio\n` +
             `${B} 🎙️ *${p}transcrever* — áudio/vídeo → texto (marque o áudio)\n` +
              `${B} ⚡ *${p}acelerar* • 🐌 *${p}desacelerar* — áudio/vídeo\n` +

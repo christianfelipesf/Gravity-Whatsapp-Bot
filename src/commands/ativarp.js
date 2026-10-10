@@ -45,7 +45,7 @@ module.exports = {
         }
         try {
             await sock.sendMessage(from, {
-                text: `🟡 *Ativamento Parcial* ativado!${already ? ' (já estava ativo)' : ''}\n\n⏱️ Tempo de espera: ${waitSec}s\n🎬 Comandos permitidos: mídia + interação (!s, !play, !toimg, !download, !abraco, etc.) + voz (!tts)\n🚫 Demais comandos (admin/geral) são ignorados em silêncio.\n🛡️ Moderação (mute/antilink/antiflood) fica pausada no parcial.\n\n💡 O bot só responde se nenhum outro bot reagir em ${waitSec}s.\n\nPara voltar ao modo total, use ${utils.readConfig ? `${utils.readConfig().prefix}` : '!'}ativar.`
+                text: `🟡 *Ativamento Parcial* ativado!${already ? ' (já estava ativo)' : ''}\n\n⏱️ Tempo de espera: ${waitSec}s\n🎬 Comandos permitidos: mídia + interação (!s, !toimg, !abraco, etc.) + voz (!tts)\n👑 Downloads (!play, !dl/!download, !tiktok) só dono/sub-donos.\n🚫 Demais comandos (admin/geral) são ignorados em silêncio.\n🛡️ Moderação (mute/antilink/antiflood) fica pausada no parcial.\n\n💡 O bot só responde se nenhum outro bot reagir em ${waitSec}s.\n\nPara voltar ao modo total, use ${utils.readConfig ? `${utils.readConfig().prefix}` : '!'}ativar.`
             }, { quoted: m });
         } catch (err) {
             console.error('❌ [BOT-PARCIAL] falhou ao enviar mensagem de ativamento:', err.message);

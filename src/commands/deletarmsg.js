@@ -15,11 +15,19 @@ module.exports = {
         const isOwner = m.key.fromMe || sender === meId || senderNorm === meId;
 
         let isGuardian = false;
+        let isSubOwner = false;
         if (!isSenderAdmin && !isOwner && typeof utils.canGuardianActAsync === 'function') {
-            try { if ((await utils.canGuardianActAsync(sock, m, sender, from)).ok) isGuardian = true; } catch (_) {}
+            try {
+                const g = await utils.canGuardianActAsync(sock, m, sender, from);
+                if (g && g.ok) {
+                    if (g.sub) isSubOwner = true;
+                    else if (g.guardiao) isGuardian = true;
+                    else if (!g.owner) isGuardian = true;
+                }
+            } catch (_) {}
         }
 
-        if (!isSenderAdmin && !isOwner && !isGuardian) {
+        if (!isSenderAdmin && !isOwner && !isSubOwner && !isGuardian) {
             return await sock.sendMessage(from, { text: '❌ Apenas administradores ou guardiões podem usar este comando.' }, { quoted: m });
         }
 
@@ -42,7 +50,11 @@ module.exports = {
 
         // Mensagem do próprio bot: o WhatsApp deixa o bot apagar a própria msg
         // mesmo sem ser admin (delete fromMe). Só msg de terceiros exige bot-admin.
+        // Guardião (puro, sem admin/sub/dono) só pode apagar msg do próprio bot.
         if (!isQuotedFromMe) {
+            if (isGuardian && !isSenderAdmin && !isOwner && !isSubOwner) {
+                return await sock.sendMessage(from, { text: '❌ Guardiões só podem apagar mensagens do próprio bot.\n\n💡 Responda uma mensagem do bot com *!d*. Mensagens de outras pessoas só podem ser apagadas por admins, sub-donos ou pelo dono.' }, { quoted: m });
+            }
             const isBotAdmin = await utils.botIsAdmin(sock, from);
             if (!isBotAdmin) {
                 return await sock.sendMessage(from, { text: '❌ Eu preciso ser administrador para apagar mensagens de outras pessoas.\n\n💡 Mensagens do próprio bot eu consigo apagar mesmo sem admin — responda a msg do bot com *!d*.' }, { quoted: m });
@@ -61,12 +73,12 @@ module.exports = {
             await utils.react(sock, m, '🗑️', lastBotResponse, GLOBAL_COOLDOWN);
             try {
                 const partDomain = String(participant || '').split('@')[1] || (isQuotedFromMe ? 'bot' : 'ausente');
-                console.log(`🗑️ [deletarmsg] alvo stanza=${String(stanzaId).slice(-8)} part=${partDomain} fromMe=${isQuotedFromMe} por ${isOwner ? 'dono' : isSenderAdmin ? 'admin' : 'guardião'}`);
+                console.log(`🗑️ [deletarmsg] alvo stanza=${String(stanzaId).slice(-8)} part=${partDomain} fromMe=${isQuotedFromMe} por ${isOwner ? 'dono' : isSenderAdmin ? 'admin' : isSubOwner ? 'sub-dono' : 'guardião'}`);
             } catch (_) {}
 
             // Limpa o comando do usuário — EXCETO quando quem usou foi admin
-            // do grupo ou o dono: a mensagem do !d deles é mantida no chat.
-            if (!isSenderAdmin && !isOwner) {
+            // do grupo, sub-dono ou o dono: a mensagem do !d deles é mantida no chat.
+            if (!isSenderAdmin && !isOwner && !isSubOwner) {
                 try {
                     await utils.sendMessageSafe(sock, from, { delete: m.key }, { maxRetries: 1 });
                 } catch (_) {}

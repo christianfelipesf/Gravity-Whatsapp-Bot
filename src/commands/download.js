@@ -283,12 +283,32 @@ async function safeSend(sock, from, payload, quoted) {
     try { return await sock.sendMessage(from, payload, quoted ? { quoted } : {}); } catch (e) { if (isConnectionClosedError(e)) { console.warn(`[DL] sendMessage falhou (conexão fechada, mensagem descartada)`); return null; } throw e; }
 }
 
+// Só dono e sub-dono podem baixar mídia (evita abuso / custo em grupos).
+async function assertOwnerOrSub(sock, m, sender, from, utils) {
+    try {
+        if (typeof utils.isBotOwner === 'function' && utils.isBotOwner(sock, m, sender)) return true;
+    } catch (_) {}
+    try {
+        if (typeof utils.canConfigureBot === 'function' && utils.canConfigureBot(sock, m, sender, from).ok) return true;
+    } catch (_) {}
+    try {
+        if (typeof utils.isSubOwnerSenderAsync === 'function') {
+            const r = await utils.isSubOwnerSenderAsync(sock, m, sender, from);
+            if (r && (r.ok || r.owner)) return true;
+        }
+    } catch (_) {}
+    return false;
+}
+
 module.exports = {
     name: 'download',
     aliases: ['dl', 'baixar', 'media', 'social', 'tiktok', 'ttk', 'fb', 'facebook', 'insta', 'instagram', 'reel', 'shorts', 'youtube', 'yt', 'twitter', 'x', 'playv', 'playvideo', 'dhd', 'downloadhd'],
     category: 'mídia',
-    description: 'Baixa mídia de redes sociais ou busca YouTube por texto (limite configurável de duração e MB)',
-    async execute(sock, m, { from, fullArgsText, commandName, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
+    description: 'Baixa mídia de redes sociais ou busca YouTube por texto (limite configurável de duração e MB) — só dono/sub-dono',
+    async execute(sock, m, { from, sender, fullArgsText, commandName, utils, lastBotResponse, GLOBAL_COOLDOWN }) {
+        if (!(await assertOwnerOrSub(sock, m, sender, from, utils))) {
+            try { return await utils.react(sock, m, '❌', lastBotResponse, GLOBAL_COOLDOWN); } catch (_) { return lastBotResponse; }
+        }
         const { react, reactStatus } = utils;
         const safeReactStatus = async (...a) => {
             try { return await reactStatus(...a); } catch (e) { if (isConnectionClosedError(e)) return a[5] || null; throw e; }

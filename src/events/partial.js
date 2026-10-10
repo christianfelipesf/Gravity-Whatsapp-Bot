@@ -15,6 +15,7 @@ const PARTIAL_BLOCKED_COMMANDS = new Set([
     'd', 'deletemsg', 'deletarmsg', 'apagarmsg', 'delmsg', 'deletar', 'apagarmensagem',
     'divulgar', 'mencionar', 'set', 'setprefix', 'multiprefixo', 'multiprefix', 'prefixos', 'addguardiao', 'addguardian', 'remguardiao', 'remguardian', 'delguardiao', 'listguardioes', 'listguardians', 'guardioes', 'listaguardioes', 'guardians', 'menuguardiao', 'menuguardian', 'menu-guardiao', 'menuguardioes', 'guardiaomenu', 'redegravity', 'redegravidade', 'redegrav', 'rede-gravity', 'gruposgravity', 'statusgrupos', 'statusgroups', 'gruposstatus', 'metricasgrupos', 'statusgps', 'painelgrupos', 'temaglobal', 'globaltema', 'temaglob', 'setlink', 'dashreset', 'newsreset',
     'dashboardativar', 'dashboarddesativar', 'newsativar', 'newsdesativar', 'dump', 'config', 'nome', 'tema', 'theme',
+    'tag', 'tagmode', 'tags',
     'log', 'logs', 'logsterminal', 'terminallog',
     'menu', 'help', 'comandos', 'prefixo', 'prefix', 'resumir', 'grupos', 'perfil', 'ai',
     'sortear', 'sorteio', 'aleatorio', 'random',
